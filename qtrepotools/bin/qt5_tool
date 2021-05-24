@@ -1,0 +1,991 @@
+#!/usr/bin/perl -w
+####################################################################################################
+#
+# Helper script for Qt 5
+#
+# Copyright (C) 2015 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+####################################################################################################
+
+############################################################################################
+#
+# Convenience script working with a Qt 5 repository.
+#
+# Feel free to add useful options!
+#
+# To keep this script working with older Perl versions, please follow these guidelines:
+# - Variables should not shadow others.
+############################################################################################
+
+use strict;
+
+use Getopt::Long qw(:config no_ignore_case);
+use File::Basename;
+use File::Spec;
+use File::Copy;
+use POSIX;
+use IO::File;
+use File::Path;
+use Cwd 'realpath';
+
+my $CLEAN=0;
+my $PULL=0;
+my $BUILD=0;
+my $MAKE=0;
+my $RESET=0;
+my $DIFF=0;
+my $BOOTSTRAP=0;
+my $STATUS=0;
+my $UPDATE=0;
+my $TEST=0;
+my $optDryRun;
+my $optEditConfig;
+my $optGerritModule;
+my $optIncredibuild;
+my $optGitHooks;
+my $optDesiredBranch;
+my $superRepositoryUrl = 'git://code.qt.io/qt/qt5.git';
+my $codeReviewHost = 'codereview.qt-project.org';
+my $codeReviewPort = 29418;
+my $configFile;
+
+my $USAGE=<<EOF;
+Usage: qt5_tool [OPTIONS]
+
+Utility script for working with Qt 5 modules.
+
+Feel free to extend!
+
+Options:
+  -d  Diff (over all modules, relative to root)
+  -e  Edit config file
+  -s  Status
+  -r  Reset hard to upstream state
+  -c  Clean
+  -u  Update
+  -p  Pull (for development only)
+    --Branch (dev/stable) to select which branches to check out when pulling
+  -b  Build (configure + build)
+  -m  Make
+  -t  Test: Builds and runs tests located in tests/auto for each module,
+      creates log file(s) in that directory as well as a summary log  file.
+  -q  Quick bootstrap a new checkout under current folder.
+  -g <module> Set up gerrit for the module.
+  -i  Use incredibuild
+  -D  Dry run, print commands
+
+Example use cases:
+  qt5_tool -c -u -b             Clean, update and build for nightly builds
+  qt5_tool -d                   Generate modules diff relative to root directory
+  qt5_tool -r                   Reset repository to upstream state (hard).
+  qt5_tool -p --Branch stable   Check out all repos to the stable branches
+
+qt_tool can be configured by creating a configuration file
+"%CONFIGFILE%"
+in the format key=value. It is possible to use repository-specific values
+by adding a key postfixed by a dash and the repository folder base name.
+Use 'true', '1' for Boolean keys.
+Supported keys:
+
+initArguments:      Arguments to init-repository for -q.
+codeReviewUser:     User name for code review (Gerrit)
+branch:             'dev', 'stable', 'release' or other
+configureArguments: Arguments to configure
+skip:               List of Qt modules to exclude from building
+shadowBuildPostfix: Postfix to use for shadow build directory.
+incredibuild:       Use Incredibuild (true/false)
+jobs:               Number of jobs to be run simultaneously
+
+Example:
+shadowBuildPostfix=-build
+shadowBuildPostfix-qt-5special=-special-build
+
+specifies that for a checkout in '/home/user/qt-5', shadow builds are to be
+done in '/home/user/qt-5-build'. It is overridden by a value for the checkout
+'/home/user/qt-5special', which would result in '/home/user/qt-5-special-build'
+Continuation lines are indicated by a trailing backslash (\\).
+
+Arbitrary keys can be defined and referenced by \$(name):
+
+skipDefault=qtcanvas3d qtcharts...
+skip=\$(skipDefault)
+skip-qt-minimalbuild=\$(skipDefault) qtdatavis3d...
+EOF
+
+# --------------- Detect OS
+
+my ($OS_LINUX, $OS_WINDOWS, $OS_MAC)  = (0, 1, 2);
+my $os = $OS_LINUX;
+if (index($^O, 'MSWin') >= 0) {
+    $os = $OS_WINDOWS;
+} elsif (index($^O, 'darwin') >= 0) {
+   $os = $OS_MAC;
+}
+
+# -- Convenience for path search.
+#    There is File::Which, but not by default installed on Linux.
+
+sub which
+{
+    my ($needle) = @_;
+    my $sep = $os == $OS_WINDOWS ? ';' : ':';
+    my @needles = ($needle);
+    push(@needles, $needle . '.exe', $needle . '.bat', $needle . '.cmd') if $os == $OS_WINDOWS;
+    foreach my $path (split(/$sep/, $ENV{'PATH'})) {
+        foreach my $n (@needles) {
+            my $binary = File::Spec->catfile($path, $n);
+            return $binary if (-f $binary);
+        }
+    }
+    return undef;
+}
+
+# -- Locate an utility (grep, scp, etc) in MSYS git by
+#    cd'ing up from the path of git passed in (either 'cmd/git.exe' or
+#    'bin/git.exe') and then trying 'bin' (pre 2.5) or '/usr/bin' (2.5).
+sub msysGitUtility
+{
+    my ($git, $utility) = @_;
+    my $msysGitRoot = dirname(dirname($git));
+    foreach my $binFolder ('bin', 'usr/bin') {
+        my $file = File::Spec->catfile($msysGitRoot, $binFolder, $utility . '.exe');
+        return $file if -f $file;
+    }
+    return $utility;
+}
+
+my $make = 'make';
+my @makeArgs = ('-s');
+my $makeForceArg = '-k';
+my $minGW = 0;
+
+sub checkMake
+{
+    my $useIncredibuild = undef;
+    my $jobs = -1;
+    if (defined($configFile) && -f $configFile) {
+        $useIncredibuild = readQt5ToolConfigBool('incredibuild') || defined($optIncredibuild);
+        $jobs = readQt5ToolConfigInt('jobs', -1);
+    }
+    if ($os == $OS_WINDOWS) {
+        if (which('g++')) {
+            $make = 'mingw32-make';
+        } else {
+            @makeArgs = ('/s', '/l');
+            $makeForceArg = '/k';
+            my $jom;
+            $jom = which('ibjom') if $useIncredibuild;
+            $jom = which('jom') unless defined($jom);
+            if (defined $jom) {
+                $make = $jom;
+                unshift(@makeArgs, '/J', $jobs) if $jobs > 0;
+            } else {
+                $make = 'nmake';
+                # Switch cl compiler to multicore
+                my $oldCL = $ENV{'CL'};
+                if (defined $oldCL) {
+                    $ENV{'CL'} = $oldCL . ' /MP'
+                } else {
+                    $ENV{'CL'} = '/MP'
+                }
+            } # jom
+        } # !MinGW
+    } else {
+        unshift(@makeArgs, '-j', $jobs) if $jobs > 0;
+        if ($useIncredibuild) {
+            my $ib_console = '/opt/incredibuild/bin/ib_console';
+            if (-x $ib_console) {
+                unshift(@makeArgs, $make);
+                unshift(@makeArgs, '--avoid'); # caching, v0.96.74
+                $make = $ib_console;
+            }
+        }
+   }
+} # sub checkMake
+
+my $git = which('git'); # TODO: Mac, Windows special cases?
+die ('Unable to locate git') unless defined $git;
+
+my $rootDir = '';
+my $baseDir = '';
+my $home = $os == $OS_WINDOWS ? ($ENV{'HOMEDRIVE'} . $ENV{'HOMEPATH'}) : $ENV{'HOME'};
+
+# -- Set a HOME variable on Windows such that scp. etc. feel at home (locating .ssh).
+$ENV{'HOME'} = $home if ($os == $OS_WINDOWS && not defined $ENV{'HOME'});
+
+my $user = $os == $OS_WINDOWS ? $ENV{'USERNAME'} : $ENV{'USER'};
+
+# -- Determine configuration file (~/.config if present).
+if ($os == $OS_WINDOWS) {
+    $configFile = File::Spec->catfile($ENV{'APPDATA'}, 'qt5_tool.conf');
+} else {
+    my $configFolder = File::Spec->catfile($home, '.config');
+    $configFile = -d $configFolder ?
+                  File::Spec->catfile($configFolder, 'qt5_tool.conf') :
+                  File::Spec->catfile($home, '.qt5_tool');
+}
+$USAGE =~ s/%CONFIGFILE%/$configFile/; # Replace placeholder.
+
+my @MODULES = ();
+
+my ($branchConfigKey) = ('branch');
+
+# --- Execute a command and print to log.
+sub execute
+{
+    my @args = @_;
+    print '### [',basename(getcwd()),'] ', join(' ', @args),"\n";
+    return $optDryRun ? 0 : system(@args);
+}
+
+sub executeCheck
+{
+    my @args = @_;
+    my $rc = execute(@args);
+    die ($args[0] . ' failed ' . $rc . ':' . $!) if $rc != 0;
+}
+
+sub editor
+{
+   my $editor = $ENV{'EDITOR'};
+   if (defined($editor)) {
+        $editor = substr($editor, 1, length($editor) - 2) if $editor =~ /^".*"$/;
+        return $editor;
+   }
+   return $os == $OS_WINDOWS ? 'notepad' : 'vi';
+}
+
+# --- Prompt for input with a default
+
+sub prompt
+{
+    my ($promptText, $defaultValue) = @_;
+    print $promptText,' [', $defaultValue, ']:';
+    my $userInput = <STDIN>;
+    chomp ($userInput);
+    return $userInput eq '' ? $defaultValue : $userInput;
+}
+
+# --- Fix a diff line from a submodule such that it can be applied to
+#     the root Qt 5 directory, that is:
+#     '--- a/foo...' -> '--- a/<module>/foo...'
+
+sub fixDiff
+{
+   my ($line, $module) = @_;
+   if (index($line, '--- a/') == 0 || index($line, '+++ b/') == 0) {
+       return substr($line, 0, 6) . $module . '/' . substr($line, 6);
+   }
+   if (index($line, 'diff --git ') == 0) {
+       $line =~ s| a/| a/$module/|;
+       $line =~ s| b/| b/$module/|;
+   }
+   return $line;
+}
+
+# --- Determine a suitable log file name for test log files.
+
+sub formatTestLogBaseName
+{
+    my ($number, $module) = @_;
+    my $result = 'test';
+    $result .= '_win' if $os == $OS_WINDOWS;
+    $result .= '_unix' if $os == $OS_LINUX;
+    $result .= '_mac' if $os == $OS_MAC;
+    if (defined $module) {
+        $result .= '_';
+        $result .=  index($module, 'qt') == 0 ? substr($module, 2) : $module;
+    }
+    $result .= '_' . strftime('%y%m%d', localtime());
+    $result .= '_' . $number if $number > 0;
+    return $result;
+}
+
+# ---- Generate a diff from all submodules such that it can be applied to
+#      the root Qt 5 directory.
+
+sub diff
+{
+    my $totalDiff = '';
+    my ($rootDir,$modArrayRef) = @_;
+    foreach my $MOD (@$modArrayRef) {
+     chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+     my $diffOutput = `"$git" diff`;
+     foreach my $line (split(/\n/, $diffOutput)) {
+         chomp($line);
+         $totalDiff .= fixDiff($line, $MOD);
+         $totalDiff .= "\n";
+     }
+     chdir($rootDir);
+  }
+  return $totalDiff;
+}
+
+# ---- runGit() Run git in the current directory.
+
+my $RUN_GIT_FAILMODE_EXIT = 0;
+my $RUN_GIT_FAILMODE_IGNORE = 1;
+my $RUN_GIT_FAILMODE_RETRY = 2;
+
+sub runGit
+{
+    my ($argListRef, $failMode, $module) = @_;
+    $failMode = $RUN_GIT_FAILMODE_EXIT unless defined $failMode;
+    $module = '<root>' unless defined $module;
+    my $exitCode = 1;
+    for (my $r = 0; $r < 3; ++$r) {
+        $exitCode = execute($git, @$argListRef);
+        last if !$exitCode || $failMode != $RUN_GIT_FAILMODE_RETRY;
+        warn('### Retrying ' . join(' ', @$argListRef) . ' in ' .  $module);
+    }
+    if ($exitCode) {
+        my $reportString = join(' ', @$argListRef) . ' failed in ' . $module . '.';
+        die ($reportString) if $failMode != $RUN_GIT_FAILMODE_IGNORE;
+        warn ($reportString);
+   }
+   return $exitCode;
+}
+
+# ---- runGitAllModules() Run git in root and module folders.
+#      Do not use 'git submodules foreach' to be able to work on
+#      partially corrupt repositories.
+
+sub runGitAllModules
+{
+    my ($argListRef, $failMode) = @_;
+    $failMode = $RUN_GIT_FAILMODE_EXIT unless defined $failMode;
+    print 'Running ', join(' ', @$argListRef), "\n";
+
+    my $runRC = runGit($argListRef, $failMode);
+    foreach my $MOD (@MODULES) {
+        chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+        my $modRunRC = runGit($argListRef, $failMode, $MOD);
+        $runRC = 1 if $modRunRC != 0;
+        chdir($rootDir);
+    }
+    return $runRC;
+}
+
+# ---- Expand references to other keys in config files "$(name)" by value.
+
+sub expandReferences
+{
+    my ($hashRef, $line) = @_;
+    while ($line =~ /\$\([^)]+\)/) {
+       my $matchStart = $-[0];
+       my $matchEnd = $+[0];
+       my $varName = substr($line, $matchStart + 2, $matchEnd - $matchStart - 3);
+       my $value = $$hashRef{$varName};
+       die ('Undefined variable ' . $varName . ' while expanding: ' . $line) unless defined($value);
+       substr($line, $matchStart, $matchEnd - $matchStart, $value);
+    }
+    return $line;
+}
+
+# ---- Read a value from a configuration file of the form key=value
+#      and return an anonymous hash.
+
+sub readConfigFile
+{
+    my ($fileName) = @_;
+    my $f = new IO::File('<' . $fileName) or die ('Cannot open ' . $fileName . ': ' . $1);
+    my $result = {};
+    while (my $line = <$f>) {
+        chomp($line);
+        if ($line =~ /^\s*([A-Za-z0-9_\-\.]+)\s*=\s*(.*)$/) {
+           my $key = $1;
+           my $value = $2;
+           while (rindex($value, '\\') == length($value) - 1) { # continuation lines "a=b\", "continued..."
+               chop($value);
+               my $line = <$f>;
+               die('Trailing continuation line "' . $value . '"') unless defined $line;
+               chomp($line);
+               $value .= $line;
+           }
+           $$result{$key} = expandReferences($result, $value);
+        }
+    }
+    $f->close();
+    return $result;
+}
+
+# ---- Read a value from a git config line.
+
+sub readGitConfig
+{
+    my ($module, $key) = @_;
+    my $gitConfigFile = File::Spec->catfile($rootDir, $module, '.git', 'config');
+    my $hashRef = readConfigFile($gitConfigFile);
+    my $value = $$hashRef{$key};
+    return defined($value) ? $value : '';
+}
+
+# ---- MinGW: Remove git from path (prevent sh.exe from throwing off mingw32-make).
+
+sub winRemoveGitFromPath
+{
+    my @path = split(/;/, $ENV{'PATH'});
+    my @cleanPath = grep(!/git/, @path);
+    if (@path != @cleanPath) {
+        print 'Removing git from path...';
+        $ENV{'PATH'} = join(';', @cleanPath);
+    }
+}
+
+# ---- Set up a tracking branch
+sub initTrackingBranch
+{
+    my ($branchName, $remoteBranchName) = @_;
+    my $strc = execute($git, ('fetch', 'origin'));
+    die 'fetch failed.' if $strc;
+    print 'Switching to ', $branchName, ' from ', $remoteBranchName, "\n";
+    $strc = execute($git, ('branch', '--track', $branchName, $remoteBranchName));
+    die 'branch ' . $branchName . ' ' . $remoteBranchName . ' failed.' if $strc;
+    $strc = execute($git, ('checkout', $branchName));
+    die 'checkout failed.' if $strc;
+}
+
+# ---- Set 'MAKEFLAGS' which depends on OS
+sub setMakeEnvironment
+{
+    my ($make, @makeArgs) = @_;
+    my $makeFlags = $ENV{"MAKEFLAGS"};
+    $makeFlags = '' unless defined $makeFlags;
+    if ($make eq 'nmake' || $make eq 'jom') {
+        # Windows: MAKEFLAGS=SLK
+        for my $arg (@makeArgs) {
+            $makeFlags .= substr($arg, 1);
+        }
+    } else {
+        # UNIX: Concatenate
+        $makeFlags .= ' ' unless $makeFlags eq '';
+        $makeFlags .= join(' ', @makeArgs);
+    }
+    print 'Setting environment for ', $make, " '", $makeFlags, "'\n";
+    $ENV{"MAKEFLAGS"} = $makeFlags;
+}
+
+# ----- Create ls -l like listing for a file name
+sub ls
+{
+    my ($fileName) = @_;
+    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size, $atime,$mtime,$ctime,$blksize,$blocks) = stat($fileName);
+    return $fileName . ' not found' unless defined $dev;
+    return $fileName . ' ' . $size . ' ' . scalar(localtime($mtime));
+}
+
+# ---- Read a value from the '$HOME/.qt5_tool' configuration file
+#      When given a key 'key' for the repository directory '/foo/qt-5',
+#      check for the repo-specific value 'key-qt5' and then for the general
+#      'key'.
+
+my $configHashRef;
+
+sub readQt5ToolConfig
+{
+    my ($key) = @_;
+    $configHashRef = readConfigFile($configFile) unless defined($configHashRef);
+    my $repoKey = $key . '-' . $baseDir;
+    my $value = $$configHashRef{$key . '-' . $baseDir};
+    $value = $$configHashRef{$key} unless defined($value);
+    return defined($value) ? $value : '';
+}
+
+sub readQt5ToolConfigBool
+{
+   my ($key) = @_;
+   my $value = readQt5ToolConfig($key);
+   return (length($value) > 0 && ($value eq '1' || $value =~ /true/i)) ? 1 : 0;
+}
+
+sub readQt5ToolConfigInt
+{
+   my ($key, $default) = @_;
+   my $value = readQt5ToolConfig($key);
+   return length($value) > 0 ? int($value) : $default;
+}
+
+sub shadowBuildFolder
+{
+    my $shadowBuildPostfix = readQt5ToolConfig('shadowBuildPostfix');
+    return $shadowBuildPostfix ne '' ? $rootDir . $shadowBuildPostfix : '';
+}
+
+# ---- Check for absolute path names.
+
+sub isAbsolute
+{
+    my ($file) = @_;
+    return index($file, ':') == 1 if ($os == $OS_WINDOWS);
+    return index($file, '/') == 0;
+}
+
+# ---- Determine modules by trying to find <module>/.git/config.
+sub determineModules
+{
+    my ($rootFolder) = @_;
+    opendir (DIR, $rootFolder) or die ('Cannot read ' . $rootFolder . $!);
+    my @mods = ();
+    while (my $e = readdir(DIR)) {
+        if ($e ne '.' && $e ne '..' && -d $e) {
+            my $gitFolder = File::Spec->catfile($e, '.git');
+            push(@mods, $e) if -e $gitFolder;
+       }
+    }
+    closedir(DIR);
+    die ('Failed to detect modules in ' . $rootFolder . ".\nNeeds to be called from the root directory.") if @mods == 0;
+    return sort(@mods);
+}
+
+# ---- Return the preferred branch for a module/Qt branch.
+#      Empty result means: Do not touch the module.
+sub preferredBranch
+{
+    my ($module, $desiredQtBranch) = @_;
+    my %preferredBranches = ( # Fixed branches
+        'qtrepotools' => 'master',
+#       -- Unmaintained modules as of 4.12.2012. Qt3D currently only has 'dev'
+        'qtfeedback' => 'master',
+        'qtpim' => 'master',
+        'qtqa' => 'master',
+    );
+    my $result = $preferredBranches{$module};
+    return $result if defined $result;
+    if ($module eq 'qtenginio') {
+        my %enginioMapping = (
+            '5.4' => '1.1',
+            '5.5' => '1.2'
+        );
+        my $mapped = $enginioMapping{$desiredQtBranch};
+        return defined $mapped ? $mapped : 'dev';
+    }
+    return $desiredQtBranch;
+}
+
+# ---- Helper to be called before pull. Checks if
+#      the module is in a 'no branch' state after init-repository or in the wrong
+#      branch as from the configuration file.
+#      If so, check out a branch, checking preferredBranches hash.
+
+sub checkoutBranch
+{
+    my ($mod, $desiredBranchIn) = @_;
+    my $desiredBranch = preferredBranch($mod, $desiredBranchIn);
+    if ($desiredBranch eq '') {
+       print 'Skipping ', $mod, ".\n";
+       return 0;
+    }
+    # Determine branch
+    my @branches = split("\n", `"$git" branch`);
+    my @currentBranches = grep(/^\* /, @branches);
+    die ('Unable to determine branch of ' . $mod) if @currentBranches != 1;
+    my $currentBranch = substr($currentBranches[0], 2);
+    #  We have one, no need to act.
+    if ($currentBranch eq $desiredBranch) {
+        print $mod, ' is already on branch: "',$currentBranch,"\".\n";
+        return 1;
+    }
+    # Does the local branch exist?
+    my $rc = 0;
+    if (!grep(/^  $desiredBranch$/, @branches)) {
+        # Does the remote branch exist?
+        my $remoteBranchPattern = '^\s*(origin/.*' . $desiredBranch . ')$';
+        $rc = execute($git, ('fetch', 'origin'));
+        die 'fetch of ' . $mod . ' failed'  if ($rc);
+        my @availableRemoteBranches = split("\n", `"$git" branch -r`);
+        my $remoteBranchName = undef;
+        for my $remoteBranch (@availableRemoteBranches) {
+            if ($remoteBranch =~ /$remoteBranchPattern/) {
+                $remoteBranchName = $1;
+                last;
+            }
+        }
+        if (!$remoteBranchName) {
+            print $mod, ' does not have the remote branch of "', $desiredBranch, "\" set up, skipping.\n";
+            return 0;
+        }
+        $rc = execute($git, ('branch', '--track', $desiredBranch, $remoteBranchName));
+        die 'Creation of ' . $desiredBranch . ' tracking ', $remoteBranchName, ' failed'  if ($rc);
+    }
+    print 'switching ',$mod, ' from "', $currentBranch,'" to "',$desiredBranch,"\".\n";
+    $rc = execute($git, ('checkout', $desiredBranch));
+    die 'Checkout of ' . $desiredBranch . ' failed'  if ($rc);
+    return 1;
+}
+
+# --------------- MAIN: Parse arguments
+
+my $startTime = time();
+
+$Getopt::ignoreCase = 0;
+if (!GetOptions('clean' => \$CLEAN,
+     'pull' => \$PULL, 'Branch=s' => \$optDesiredBranch,
+     'Dry-run' => \$optDryRun, 'edit' => \$optEditConfig,
+     'update' => \$UPDATE, 'reset' => \$RESET,
+     'diff' => \$DIFF, 's' => \$STATUS,
+     'build' => \$BUILD, 'make' => \$MAKE, 'test' => \$TEST,
+     'gerrit=s' => \$optGerritModule, 'hooks' => \$optGitHooks,
+     'quick-bootstrap'  => \$BOOTSTRAP,
+     'incredibuild' => \$optIncredibuild)
+    || ($CLEAN + $PULL + $UPDATE + $BUILD + $MAKE + $RESET + $DIFF + $BOOTSTRAP + $STATUS + $TEST + $optEditConfig == 0
+        && !defined $optGerritModule && !defined $optGitHooks)) {
+    print $USAGE;
+    exit (1);
+}
+
+if ($optEditConfig) {
+   system((editor(), $configFile));
+   exit(0);
+}
+
+checkMake();
+
+sub defaultConfigureArguments
+{
+    my ($developerBuild) = @_;
+    my $result = '-confirm-license';
+    $result .= ' -developer-build' if ($developerBuild);
+    $result .= ' -opensource -debug';
+#   On Mac, -debug requires -no-framework (or use -debug-and-release)?
+    $result .= ' -no-framework' if  $os == $OS_MAC;
+    $result .= ' -xcb' if $os == $OS_LINUX && defined $ENV{'DISPLAY'};
+    $result .= ' -nomake tests -nomake examples';
+    return $result;
+}
+
+#   -- Prompt to create configuration file for options that require it.
+if (($BOOTSTRAP + $BUILD != 0 || defined $optGerritModule) && ! -f $configFile) {
+    print "\n### This appears to be the first use of qt5_tool on this machine.\n\nCreating configuration file '",$configFile, "'...\n";
+    my $newDeveloperBuild = prompt('Developer build (y/n)', 'y') =~ /y/i;
+    my $newCodeReviewUser = '';
+    my $newInitArgumentsDefault = '--module-subset=default,-qtwebengine';
+    $newCodeReviewUser = prompt('Enter CodeReview user name', $user) if ($newDeveloperBuild);
+    my $newInitArguments = prompt('Enter arguments to init-repository', $newInitArgumentsDefault);
+    my $newConfigureArguments = prompt('Enter arguments to configure', defaultConfigureArguments($newDeveloperBuild));
+    my $defaultkippedModules = 'qt3d qtcanvas3d qtconnectivity qtenginio qtfeedback qtgraphicaleffects qtlocation qtpim qtquick1 qtscript qtsensors qtserialport qtsystems qtwayland qtwebchannel qtwebengine qtwebsockets qtxmlpatterns';
+    my $newSkippedModules = prompt('Enter a list of modules to skip', $defaultkippedModules);
+    my $newBranch = prompt('Branch', 'dev');
+    my $configFileHandle = new IO::File('>' . $configFile) or die ('Unable to write to ' . $configFile . ':' . $!);
+    print $configFileHandle 'configureArguments=', $newConfigureArguments, "\n" if $newConfigureArguments ne '';
+    print $configFileHandle 'skip=',$newSkippedModules, "\n" if $newSkippedModules ne '';
+    print $configFileHandle 'initArguments=',$newInitArguments, "\n" if $newInitArguments ne '';
+    print $configFileHandle 'codeReviewUser=', $newCodeReviewUser,"\n" if $newCodeReviewUser ne '';
+    print $configFileHandle $branchConfigKey, '=', $newBranch,"\n";
+    $configFileHandle->close();
+    print "Wrote '",$configFile, "'\n\n";
+}
+
+#  --- read config file
+my $codeReviewUser = readQt5ToolConfig('codeReviewUser');
+
+# --------------- Bootstrap
+
+if ( $BOOTSTRAP != 0 ) {
+    my $targetFolder = prompt('Enter target folder', 'qt-5');
+    my @initOptions;
+    push (@initOptions, '--codereview-username=' . $codeReviewUser) if $codeReviewUser ne '';
+    my $initArgumentsFromConfig = readQt5ToolConfig('initArguments');
+    if ($initArgumentsFromConfig ne '') {
+        push(@initOptions, split(/ /, $initArgumentsFromConfig));
+    }
+    my $toolsFolder = 'qtrepotools';
+    # -- Clone
+    my $cloneRc = execute($git, ('clone',  $superRepositoryUrl, $targetFolder));
+    die 'clone '.  $superRepositoryUrl . ' failed.' if $cloneRc;
+    chdir($targetFolder) or die ('Failed to chdir to "' . $targetFolder . '":' . $!);
+    # -- Run init
+    my $initRc = 0;
+    if ($os == $OS_WINDOWS) {
+        $initRc = execute('perl', 'init-repository', @initOptions);
+    } else {
+        $initRc = execute('./init-repository', @initOptions);
+    }
+    die 'init '. $superRepositoryUrl . ' failed.' if $initRc;
+    exit 0;
+}
+
+# --- Change to root: Assume we live in qtrepotools below root.
+#     Note: Cwd::realpath is broken in the Symbian-perl-version.
+my $prog = $0;
+$prog = Cwd::realpath($0) unless isAbsolute($prog);
+$rootDir = dirname(dirname(dirname($prog)));
+$baseDir = basename($rootDir);
+chdir($rootDir) or die ('Failed to chdir to' . $rootDir . '":' . $!);
+my $exitCode = 0;
+
+@MODULES = determineModules($rootDir);
+
+print diff($rootDir, \@MODULES) if $DIFF;
+
+# --------------- Reset: Save to a patch in HOME dir indicating date in
+#                 file name should there be a diff.
+if ( $RESET !=  0 ) {
+  print 'Resetting Qt 5 in ',$rootDir,"\n";
+  my $changes = diff($rootDir, \@MODULES);
+  if ($changes ne '') {
+     my $patch = File::Spec->catfile($home, POSIX::strftime('qt5_d%Y%m%d%H%M.patch',localtime));
+     my $patchFile = new IO::File('>' . $patch) or die ('Unable to open for writing ' .  $patch . ' :' . $!);
+     print $patchFile $changes;
+     $patchFile->close();
+     print 'Saved ', $patch, "\n";
+  }
+  my @resetArgs = ('reset', '--hard', '@{upstream}');
+  runGitAllModules(\@resetArgs, $RUN_GIT_FAILMODE_IGNORE);
+}
+
+# --------------- Status.
+if ( $STATUS !=  0 ) {
+    my @branchArgs = ('branch', '-v');
+    runGitAllModules(\@branchArgs, $RUN_GIT_FAILMODE_IGNORE);
+    my @statusArgs = ('status');
+    runGitAllModules(\@statusArgs, $RUN_GIT_FAILMODE_IGNORE);
+}
+
+#   --------------- TEST: Run auto-tests in relevant modules
+#   and create a summary log, and optionally, if the converter can be
+#   found, a tasks file for Qt Creator..
+
+if ( $TEST !=  0 ) {
+    my %testPaths;
+    my $testRelativePath = File::Spec->catfile('tests', 'auto');
+    my $catCommand = $os == $OS_WINDOWS ? 'type' : 'cat';
+#   ---  Find relevant modules.
+    foreach my $MOD (@MODULES) {
+        my $excluded = ($MOD eq 'qtactiveqt'   && $os != $OS_WINDOWS)
+                       || ($MOD eq 'qtjsondb'  && $os == $OS_WINDOWS)
+                       || ($MOD eq 'qtwayland' && $os == $OS_WINDOWS);
+        if (!$excluded) {
+            my $testPath = File::Spec->catfile($MOD, $testRelativePath);
+            $testPaths{$MOD} = $testPath if -d $testPath;
+        }
+    }
+#   -- Locate 'test2tasks.pl'. This is a script located in the Qt Creator repository
+#      that converts test output into task files that can be loaded into Qt  Creator's
+#      'Build issues' pane.
+    my $test2tasks = which('test2tasks.pl');
+#   -- Initialize logging, find a unique log file name.
+    my $testLogUniqueNumber = 0;
+    my ($summaryLogFile, $summaryTasksFile);
+    for ( ; ; $testLogUniqueNumber++) {
+        my $testLogBaseName = formatTestLogBaseName($testLogUniqueNumber);
+        $summaryLogFile = File::Spec->catfile($rootDir, $testLogBaseName . '.log');
+        $summaryTasksFile = File::Spec->catfile($rootDir, $testLogBaseName . '.tasks');
+        last unless -f $summaryLogFile || -f $summaryTasksFile;
+    }
+    if (-e $summaryTasksFile) {
+        unlink($summaryTasksFile) or die ('Unable to delete existing tasks file ' . $summaryTasksFile . ' ' . $!);
+    }
+    print '### Testing ', scalar(keys(%testPaths)), ' modules: ', join(', ', keys(%testPaths)), "\n### Logging to: ",
+          $summaryLogFile, "\n";
+#   -- Build the tests, qmake, make
+    my @buildFailures;
+    my $tn = 0;
+    foreach my $testPath (values(%testPaths)) {
+        chdir($testPath) || die ('Failed to chdir from' . $rootDir . ' to "' . $testPath);
+        print '### Building #', ++$tn, ' of ', scalar(keys(%testPaths)), ' ', $testPath, "\n";
+        my $rc = execute('qmake');
+        die ('qmake failed') unless $rc == 0;
+        $rc = execute($make, @makeArgs);
+        if ($rc != 0) {
+            print '### Warning: Build failed in ', $testPath, "\n";
+            push (@buildFailures, $testPath);
+        }
+        chdir($rootDir);
+    }
+#   -- Run the test: 'make check'. Explicitly set 'Keep' on Windows as flags are not propagated.
+    $tn = 0;
+    $ENV{'MAKEFLAGS'} = 'K' if  $make eq 'nmake';
+    foreach my $module (keys(%testPaths)) {
+        my $testPath = $testPaths{$module};
+        ++$tn;
+        if (grep (/$testPath/, @buildFailures)) {
+            print '### Skipping ', $testPath, "\n";
+            next;
+        }
+        chdir($testPath) || die ('Failed to chdir from' . $rootDir . ' to "' . $testPath);
+        print '### Running #', ++$tn, ' of ', scalar(keys(%testPaths)), ' ', $testPath, "\n";
+        my $moduleLogBaseName = formatTestLogBaseName($testLogUniqueNumber, $module);
+        my $moduleLogFile = File::Spec->catfile(getcwd(), $moduleLogBaseName . '.log');
+        my $moduleTasksFile = File::Spec->catfile(getcwd(),  $moduleLogBaseName . '.tasks');
+        my $cmd = $make . ' ' . join(' ', @makeArgs) . ' ' . $makeForceArg . ' check > ' .  $moduleLogFile;
+        print '### Running: ', $cmd, "\n";
+        system($cmd);
+#       -- concat log file.
+        $cmd = $catCommand . ' ' . $moduleLogFile . ' >> ' . $summaryLogFile;
+        print '### Running: ', $cmd, "\n";
+        system($cmd);
+#       --- Create a tasks file for Qt Creator
+        if (defined $test2tasks) {
+#           -- Local file with relative paths
+                $cmd = $test2tasks . ' < ' . $moduleLogFile . ' > ' . $moduleTasksFile;
+            print '### Running: ', $cmd, "\n";
+                   system($cmd);
+#           -- Append to summary file with path relative to its location
+            $cmd = $test2tasks . ' -r ' . $testPath . ' < ' . $moduleLogFile . ' >> ' . $summaryTasksFile;
+            print '### Running: ', $cmd, "\n";
+            system($cmd);
+        }
+        chdir($rootDir);
+    }
+    my $report = "\n### Testing done:\n";
+    $report .= '- Build failures: ' . join(', ', @buildFailures) . "\n" if (scalar(@buildFailures));
+    $report .= '- ' . ls($summaryLogFile) . "\n";
+    $report .= '- ' . ls($summaryTasksFile) . "\n" if defined $test2tasks;
+    print $report;
+}
+
+# --------------- Init gerrit
+
+if (defined $optGerritModule) {
+    my $scp = which('scp');
+    $scp = msysGitUtility($git, 'scp') unless defined $scp || $os != $OS_WINDOWS;
+    die ('Unable to locate scp.') unless defined $scp;
+    die ('This option requires a codereview-user name') if $codeReviewUser eq '';
+    chdir($optGerritModule) or die ('Failed to chdir from' . $rootDir . ' to "' . $optGerritModule);
+    my $remoteRepo = $codeReviewUser . '@' . $codeReviewHost . ':qt/' . $optGerritModule;
+    print 'Configuring ', $remoteRepo, "\n";
+    my $grc = execute($git, ('config', 'remote.origin.url',  $remoteRepo));
+    die 'Config failed'  if ($grc);
+    print 'Initializing hooks', "\n";
+    $grc = execute($scp, ('-p',  $codeReviewUser . '@' . $codeReviewHost . ':hooks/commit-msg', '.git/hooks'));
+    die 'Copying of commit hook failed'  if ($grc);
+    print 'Fetch all...', "\n";
+    $grc = execute($git, ('fetch', '--all'));
+    chdir($rootDir);
+}
+
+if (defined $optGitHooks) {
+    my $qtrepotoolsdir = dirname(dirname($prog));
+    my $postcommitpath = File::Spec->canonpath("$qtrepotoolsdir/git-hooks");
+    if ($os == $OS_WINDOWS) {
+        # rewrite from "C:/Users/qt" to "/C/Users/qt" so that msysgit understand
+        $postcommitpath =~ s,([A-Za-z]):,/$1,;
+        $postcommitpath =~ s,\\,/,g;
+    }
+    print "Installing post-commit hooks\n";
+    foreach my $MOD (@MODULES) {
+        print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
+        chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+        my $postCommitFile = '.git\hooks\post-commit';
+        my $overwrite = 1;
+        if (-f $postCommitFile) {
+            $overwrite = prompt('Overwrite existing post-commit file? (y/n)', 'n') =~ /y/i;
+        }
+        if ($overwrite) {
+            my $postCommitFileHandle = new IO::File('>' . $postCommitFile) or die ('Unable to write to ' . $postCommitFile . ':' . $!);
+            print $postCommitFileHandle "#!/bin/sh\n";
+            print $postCommitFileHandle "export PATH=\$PATH:$postcommitpath\n"; #needed
+            print $postCommitFileHandle "exec $postcommitpath/git_post_commit_hook\n";
+            $postCommitFileHandle->close();
+        }
+        chdir($rootDir);
+    }
+}
+
+# --------------- Clean if desired
+
+if ( $CLEAN !=  0 ) {
+  print 'Cleaning Qt 5 in ',$rootDir,"\n";
+  my @cleanArgs = ('clean','-dxfq');
+  runGitAllModules(\@cleanArgs, $RUN_GIT_FAILMODE_RETRY);
+}
+
+# ---- Pull: Switch to branch unless there is one (check preferred
+#      branch hash, default to branch n+1, which is mostly master).
+
+if ( $PULL !=  0 ) {
+    print 'Pulling Qt 5 in ',$rootDir,"\n";
+    my $desiredBranch = defined $optDesiredBranch ? $optDesiredBranch : readQt5ToolConfig($branchConfigKey);
+    if (!defined $desiredBranch || $desiredBranch eq '') {
+        $desiredBranch = 'dev';
+        print 'No branch has been set up in ', $configFile, ' (key: ', $branchConfigKey, '), assuming ', $desiredBranch, "\n";
+    }
+    die ('Cannot checkout ' . $desiredBranch . ' in qt5') unless checkoutBranch('qt5', $desiredBranch);
+    my @pullArgs = ('pull', '--rebase');
+    my $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY);
+    die 'Pull failed'  if ($prc);
+    foreach my $MOD (@MODULES) {
+        print 'Examining: ', $MOD, ' url: ',readGitConfig($MOD, 'url'), ' ';
+        chdir($MOD) or die ('Failed to chdir from' . $rootDir . ' to "' . $MOD . '":' . $!);
+        if (checkoutBranch($MOD, $desiredBranch)) {
+            print 'Pulling ', $MOD, "\n";
+            $prc = runGit(\@pullArgs, $RUN_GIT_FAILMODE_RETRY, $MOD);
+            die 'Pull ' . $MOD . ' failed'  if ($prc);
+        }
+        chdir($rootDir);
+   } # foreach
+} # pull
+
+# ---- Update
+
+if ( $UPDATE !=  0 ) {
+    print 'Updating Qt 5 in ',$rootDir,"\n";
+    my $urc = execute($git, ('pull'));
+    die 'pull failed'  if ($urc);
+    $urc = execute($git, ('submodule', 'update'));
+    die 'update failed'  if ($urc);
+}
+
+# ---- Configure and build
+
+my $makeInstallRequired = 0;
+
+if ( $BUILD !=  0 ) {
+    print 'Building Qt 5 in ',$rootDir,"\n";
+    winRemoveGitFromPath() if $minGW;
+    my @configureArguments;
+    my $configureArgumentsFromConfig = readQt5ToolConfig('configureArguments');
+    push(@configureArguments, split(/ +/, $configureArgumentsFromConfig)) unless $configureArgumentsFromConfig eq '';
+    my $skippedModules =  readQt5ToolConfig('skip');
+    my @skipList;
+    push(@skipList, split(/ +/, readQt5ToolConfig('skip')));
+    foreach my $skippedModule (@skipList) {
+        if (-d File::Spec->catfile($rootDir, $skippedModule)) {
+            push(@configureArguments, '-skip', $skippedModule);
+        } else {
+            warn('Module to be skipped does not exist : ' . $skippedModule);
+        }
+    }
+    $makeInstallRequired = grep(/^-prefix$/, @configureArguments);
+    my $developerBuildSpecified = grep(/-developer-build/, @configureArguments);
+    push(@configureArguments, '-developer-build') unless ($makeInstallRequired || $developerBuildSpecified);
+#   --- Shadow builds: Remove and re-create directory
+    my $shadowBuildDir = shadowBuildFolder();
+    if ($shadowBuildDir ne '') {
+        print 'Shadow build: "', $shadowBuildDir,"\"\n";
+        if (-d $shadowBuildDir) {
+            File::Path::rmtree($shadowBuildDir) or die ('Unable to remove ' . $shadowBuildDir . ' :' . $!);
+        }
+        mkdir($shadowBuildDir) or die  ('Unable to create ' . $shadowBuildDir . ' :' . $!);
+        chdir($shadowBuildDir) or die  ('Unable to chdir ' . $shadowBuildDir . ' :' . $!);
+    }
+#   ---- Configure and build
+    print 'Configure arguments: ', join(' ', @configureArguments), "\n";
+    my $brc = execute(File::Spec->catfile($rootDir, 'configure'), @configureArguments);
+    die 'Configure failed'  if ($brc);
+} # BUILD
+
+if ( $BUILD + $MAKE !=  0) {
+    my $makeShadowBuildDir = shadowBuildFolder();
+    if ($BUILD == 0) { # Did not go through configure, cd
+        if ($makeShadowBuildDir ne '') {
+            print 'Shadow build: "', $makeShadowBuildDir,"\"\n";
+            chdir($makeShadowBuildDir) or die  ('Unable to chdir ' . $makeShadowBuildDir . ' :' . $!);
+        }
+    }
+#   Run a global make for non-shadow developer build, else call 'build'.
+    executeCheck($make, @makeArgs);
+} # MAKE
+
+if ( $BUILD && $makeInstallRequired ) {
+    print 'Installing Qt 5 from ',$rootDir,"\n";
+    my @installArgs = @makeArgs;
+    # Turn of parallelization for make install, which is known to fail with jom.
+    push (@installArgs, '-j', '1') unless (index($make, 'nmake') >= 0);
+    push (@installArgs, 'install');
+    executeCheck($make, @installArgs);
+}
+
+print '--- Done (', (time() - $startTime), "s) ---\n" if $exitCode == 0 && ($BUILD || $MAKE);
+exit($exitCode);

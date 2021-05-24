@@ -1,0 +1,29 @@
+#! /bin/sh
+
+# Copyright (C) 2015 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+# Run this once a day (from a cron job) to keep the sanity bot's
+# git clones performing well.
+
+instance=sanitybot
+test -n "$1" && instance=$1
+
+root=$(git config $instance.gitbasedir)
+if test -z "$root"; then
+    echo "Error: $instance.gitbasedir not set" >&2
+    exit 1
+fi
+cd "$root" || exit
+find -name '*.git' -type d -prune | while read dir; do (
+    # use "git config --global gc.packrefs notbare" to make sure this works
+    test -d $dir/refs/changes || exit
+    echo "Entering $dir ..."
+    cd "$dir" || exit
+    find refs/changes -mindepth 1 -mtime +10 -delete
+    git gc
+); done

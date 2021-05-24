@@ -1,0 +1,73 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt Toolkit.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \example hapticsplayer
+    \title Haptics Player
+
+    \tableofcontents
+
+    \section1 Overview
+
+    This example shows how to use various haptic effects in an application via
+    the \l{Feedback}{Qt Feedback API}.
+
+    It provides an example of how to use the QtMobility libraries to:
+    \list
+    \li play "system theme" haptic effects corresponding to certain predefined events
+    \li play a dynamic custom effect, single or repeating
+    \li play a custom effect which is stored in a file
+    \endlist
+
+    \section2 Use Case
+
+    This example is more feature complete than the \l{hapticsquare}{Haptic Square} example,
+    but is intended more as a way to test the haptics provider plugins which
+    are available on a system, than as an example for application developers.
+
+    It is useful for people who wish to learn how to use the API to create and
+    play custom effects dynamically, or to allow users of an application to
+    select which haptic effect to play when a particular event occurs.  It is also useful
+    to test how effects are implemented on specific devices.
+
+    It is a more complex example than the \l{hapticsquare}{Haptic Square} example, so it is
+    suggested that developers look at that example first.
+
+    \section2 Interface
+    The application is designed to work on desktop and mobile platforms with
+    minimal differences in code between the platforms.  The interface consists
+    of three tabs which allow the user to select and play different custom,
+    system theme, and file effects, respectively.  The custom effect tab also
+    allows the user to modify the custom effect dynamically, and see the effect
+    of attack and fade, intensity and duration, and periodicity, on the user
+    experience.
+
+    \section2 Known Issues
+    The example will not work correctly on platforms which do not have a
+    QFeedbackHapticInterface (haptic effect provider) plugin loaded.  On such
+    platforms, the example will do nothing.
+*/

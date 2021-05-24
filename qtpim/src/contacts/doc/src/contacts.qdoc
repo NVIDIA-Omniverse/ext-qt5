@@ -1,0 +1,267 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+
+
+
+/*!
+
+\page qtcontacts-overview.html
+
+\title Qt Contacts Overview
+\brief An API enabling clients to request contact data from local or
+remote backends.
+
+\ingroup qtpim-c++
+
+\tableofcontents
+
+The Qt Contacts API enables a client to request contact data from local or
+remote backends in a platform-independent and datastore-agnostic manner.
+This is achieved
+by defining generic personal information data abstractions which can
+sufficiently describe contact data stored on any platform.  Due to the
+cross-platform nature of the API, and the ability for developers to write
+platform-independent implementations of a QContactManager which may unify
+one or more platform-specific contact backends, it is intended that the
+semantics and quirks of the underlying datastores on any platform may be
+entirely opaque from the perspective of Qt-based, cross-platform client
+applications.
+
+Contact information is stored in datastores whose functionality is exposed
+via a \l{QContactManager}{manager}. The Qt Contacts API models a
+\l{QContact}{contact} as a collection of distinct details. Individual contacts
+may be related to one other, and these \l{QContactRelationship}{relationships} are
+stored separately from contacts themselves and may be manipulated directly by
+clients.
+
+\l{QContact}{Contact}, and
+\l{QContactRelationship}{relationship} information may all be
+retrieved, modified or deleted by clients using either the
+\l{Qt Contacts Synchronous API}{synchronous} or
+\l{Qt Contacts Asynchronous API}{asynchronous} API.
+
+For a full list of classes, see \l{Qt Contacts C++ Classes}.
+
+\sa {Qt Contacts API Usage}
+\sa {Qt Contacts QML API}
+
+\section1 Client-Facing API
+
+The client-facing API allows retrieval, modification and deletion of contacts,
+and relationships, as well as access to manager meta data and
+capability reporting.
+
+\section2 Container Classes
+
+Contact information is stored in container (value) classes.  These classes
+are not derived from QObject, and hence can be used in lists. They do not have
+parents, do not emit signals, and so on.  They represent data which may be
+manipulated and retrieved from a \l{Manager}{manager}.
+
+\section3 Contact
+
+A \l{QContact}{contact} is the digital representation of a person, group or
+entity, which is stored in a platform-specific manner. Information pertaining
+to a single contact may be located across several different datastores, and
+each datum (or detail) may or may not pertain to a particular context in which
+that information is valid.  A contact may include semantically identical
+pieces of information that are relevant in different contexts.  For
+example, a contact may have a phone number that is relevant to their \e home
+context, and another phone number that is relevant to their \e work context.
+It can be seen that the context of information defines its validity to the
+user, depending on the context of usage; and as such, the sum of
+information in a given context can be considered equivalent to a \e {contextual
+identity}.  This allows great flexibility when consolidating data from
+various sources into a single, cohesive contact.
+
+Each contact stored in a manager is identified by an \l{QContactId}{id} which
+consists of a manager identifier (URI) and the
+QContactId manager-local id which is used to identify the contact
+in that manager.  Note that a contact stored in one manager may have the same
+local id as a different contact stored in another manager; please see the
+QContactId documentation for more information.
+
+\section3 Detail
+
+A \l{QContactDetail}{detail} is a single, cohesive unit of information that is
+stored in a contact.  As explained previously, it is valid for a particular
+context or set of contexts.  A detail
+may have specific metadata associated with it, such as its sub-type or context,
+as well as access constraints which may apply to the the detail
+(such as read-only, irremovable, etc).
+
+There are a number of common details defined in the API which are intended
+for use by clients, as listed in \l{Contact Details Leaf Classes}.
+
+\section3 Relationships
+
+Contacts may participate in \l{QContactRelationship}{relationships} with other
+contacts.  The details of any such relationship is stored by the manager which
+contains the contact.  There are several standard relationship types supported
+by default, and arbitrary relationship types are also allowed if
+the manager supports that feature.  One important relationship is that of
+group membership. Membership of a contact in a group can be modeled as that
+group contact participating in a \c HasMember relationship with the contact.
+
+\section2 Manager
+
+Access to contacts is provided by implementations of the Qt Contacts
+\l{QContactManager}{manager} API. A manager provides access to zero or more
+platform-specific datastores.  Each datastore may support different
+capabilities (for example, the ability to store certain datatypes, the ability
+to natively filter on different details,
+the provision of locking mechanisms, the provision of changelog information,
+etc) which are reported by the manager on request.  The manager therefore
+provides access to contacts and relationships stored in
+different datastores, in a platform and datastore independent manner.
+
+\section3 Meta Data API
+
+The API offered by the QContactManager exposes functionality which is
+implemented by plugins.  These plugins may be platform specific, and may be
+provided by Nokia or by third party developers.  As described above, each
+plugin will have different capabilities and implement the functionality
+exposed by the Qt Contacts API to a different degree.
+
+The QContactManager class provides a static function
+QContactManager::availableManagers() which allows clients of the API to
+determine (at run time) which plugins (managers) are available for use.
+
+Clients of the API also need to be able to determine (at run time) what the
+capabilities of a given plugin (contact manager) are.  The QContactManager
+class provides an API to query the capabilities of a given manager with the
+following synchronous functions:
+\list
+  \li isFilterSupported(const QContactFilter& filter) const
+  \li isRelationshipTypeSupported(const QString& relationshipType, const QString& contactType = QContactType::TypeContact) const
+  \li supportedDataTypes() const
+  \li supportedContactTypes() const
+\endlist
+
+A given manager is identified by its URI.  The URI consists of the manager's
+name, any relevant parameters which were used during instantiation of the
+manager, and the version of the manager.  While the name of the manager
+identifies the plugin which provides the functionality, you cannot guarantee
+that the data available through one manager will be available through another
+with the same name (for example, if one parameter tells the plugin to store
+and retrieve contact information from a particular online service or local
+file).
+
+The synchronous API offered to allow run-time querying of a manager's metadata
+includes:
+\list
+  \li managerName() const
+  \li managerParameters() const
+  \li managerUri() const
+  \li managerVersion() const;
+  \li (static) parseUri(const QString& uri, QString* managerName, QMap<QString, QString>* params)
+  \li (static) buildUri(const QString& managerName, const QMap<QString, QString>& params, int implementationVersion = -1)
+\endlist
+
+The functionality that the above functions provide is only available through
+synchronous API.
+
+
+\section3 Asynchronous API
+
+The asynchronous API provides a way to access or modify the
+contact information managed by a particular backend via non-blocking,
+asynchronous requests.  It is recommended for most
+applications that the asynchronous API be used where possible.
+
+The asynchronous API is offered through various classes derived from the
+QContactAbstractRequest class, including QContactIdFetchRequest,
+QContactFetchRequest, QContactSaveRequest, QContactRemoveRequest,
+QContactRelationshipFetchRequest, QContactRelationshipSaveRequest,
+and QContactRelationshipRemoveRequest.
+
+The asynchronous API allows manipulation of \l{QContact}{contacts} and
+\l{QContactRelationship}{contact relationships}, but does not provide manager
+capability or meta data information reporting.
+
+\sa {Qt Contacts Asynchronous API}
+
+\section3 Synchronous API
+
+The synchronous API provides the simplest way to access or modify the
+contact information managed by a particular backend.  It has the
+disadvantage that calls block the current thread of execution until completion
+and is therefore most suitable only for applications which interact with
+local, high-speed datastores, or for applications which do not require a
+responsive user interface.
+
+The synchronous API is offered through the QContactManager class, and includes
+manipulation of \l{QContact}{contacts} and
+\l{QContactRelationship}{contact relationships}.  As previously described,
+the meta data reporting and manipulation functions are also provided via
+synchronous API only.
+
+\sa {Qt Contacts Synchronous API}
+
+\section2 Actions
+
+Clients can perform \l{QContactAction}{actions} on contacts which support
+them.  Actions are things like \e {Send Email} or \e Dial, and can be provided
+from various sources including Qt Plugins or the Qt Service
+Framework. Every action implementation is uniquely identified by a
+combination of its name, the name of the service which provided the
+implementation, and the version of the implementation.  These pieces of data
+may be encapsulated in a \l{QContactActionDescriptor} which can be used to
+retrieve an instance of the implementation from a \l{QContactActionFactory}.
+
+Different actions will allow (or require) different parameters to invocation.
+For example, an action which allows clients to send emails to a contact may
+be able to accept attachments as a parameter to invocation.  Each action must
+be invoked on an \l{QContactActionTarget}{action target} or list of targets,
+where a target may be a contact or a specific detail of a particular contact.
+
+\sa {Qt Contacts Action API}
+
+\section1 Non-Client-Facing API
+
+The non-client-facing API allows third party developers to implement a manager
+engine plugin from which clients may request data.
+
+\section2 Manager Engine
+
+The functionality exposed by the QContactManager class may be implemented by
+\l{QContactManagerEngine}{engine} plugins which interface directly to a
+platform-specific backend or provide their own data storage backend.  As such,
+the terms \e manager, \e plugin and \e backend are used interchangeably in this
+documentation to refer to any engine plugin which implements the functionality
+exposed by the QContactManager interface.  The plugin architecture allows
+dynamic loading of different manager engines at runtime.
+
+A manager backend may be implemented by subclassing
+\l{QContactManagerEngine}, and providing a \l{QContactManagerEngineFactory}
+which can instantiate it when required.
+
+For more information on the available engines and how to write your own engine,
+see \l{Qt Contacts Manager Engines}.
+
+*/

@@ -1,0 +1,120 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+
+\page versit.html
+\title Qt Versit Overview
+\brief An API to import and export to the vCard and iCalendar formats.
+
+\ingroup qtpim-c++
+
+\tableofcontents
+
+\section1 Overview
+The Versit API is part of a collection of
+Personal Information Management API's providing a
+library to convert \l{QContact}{QContacts} to and from
+\l{http://en.wikipedia.org/wiki/Vcard}{vCard} files, and to convert
+\l{QOrganizerItem}{QOrganizerItems} to and from
+\l{http://en.wikipedia.org/wiki/ICalendar}{iCalendar} files.
+
+Because vCard and iCalendar share the same structure, they are represented in
+abstract form with a common class, namely QVersitDocument.  vCard and iCalendar
+files can be parsed into QVersitDocument form using QVersitReader.
+QVersitDocument objects can be written to an I/O device using QVersitWriter.
+
+A QVersitDocument object can represent either a vCard or an iCalendar.
+\l{QVersitDocument}{QVersitDocuments} representing vCards can be converted to
+\l{QContact}{QContacts} using QVersitContactImporter.
+\l{QVersitDocument}{QVersitDocuments} representing iCalendars can be converted
+to \l{QOrganizerItem}{QOrganizerItems} using QVersitOrganizerImporter.
+\l{QContact}{QContacts} and \l{QOrganizerItem}{QOrganizerItems} can be converted
+to \l{QVersitDocument}{QVersitDocuments} using QVersitContactExporter and
+QVersitOrganizerExporter, respectively.
+
+Currently \l{QVersitReader} and \l{QVersitWriter} support
+reading and writing vCard 2.1, vCard 3.0 and iCalendar 2.0 format documents.
+Please note that the Organizer API is still under development, so
+the Qt Versit API classes related to importing and exporting organizer items
+is subject to change.
+
+Versit \reg is a trademark of the Internet Mail Consortium.
+
+For full list of classes, see \l{Qt Versit C++ API}.
+
+\section1 Importing and Exporting Data
+The following example goes through the process of reading a vCard and importing
+it to QContact format, then exporting and writing it back out.
+
+First, let's create some data to read.  In this case, we create a QBuffer as a demonstration, but
+any QIODevice will work.
+\snippet qtversitdocsample/qtversitdocsample.cpp Complete example - create
+
+QVersitReader can be used to parse a vCard or iCalendar from an I/O device to
+produce a list of QVersitDocuments.
+\snippet qtversitdocsample/qtversitdocsample.cpp Complete example - read
+
+QVersitDocuments aren't very useful to the QtContacts API.  They need to be imported using the
+QVersitContactImporter.  If the QVersitDocuments were iCalendar objects, they could be imported
+using QVersitOrganizerImporter.
+\snippet qtversitdocsample/qtversitdocsample.cpp Complete example - import
+
+Conversely, QVersitContactExporter can be used to convert from QContacts to QVersitDocuments.
+(QVersitOrganizerExporter can be used for QOrganizerItem):
+\snippet qtversitdocsample/qtversitdocsample.cpp Complete example - export
+
+To complete the exporting process, QVersitWriter can be used to write to an I/O device.
+\snippet qtversitdocsample/qtversitdocsample.cpp Complete example - write
+
+\section1 Classes
+The main classes for a client interested in importing or exporting vCard and
+iCalendar documents are:
+\list
+    \li \l{QVersitProperty}
+    \li \l{QVersitDocument}
+    \li \l{QVersitReader}
+    \li \l{QVersitWriter}
+    \li \l{QVersitContactImporter}
+    \li \l{QVersitContactExporter}
+    \li \l{QVersitOrganizerImporter}
+    \li \l{QVersitOrganizerExporter}
+\endlist
+
+It is also possible to extend the behaviour of the importer and exporter classes
+by writing handlers and plugins.  For more details, see \l{Qt Versit Plugins}.
+\annotatedlist versit-extension
+
+\section1 Supported Features
+Please see the following documents for supported Versit Module features:
+ \list
+    \li \l{vcardsupport}{Supported vCard Features} document for a list of vCard features
+     that the Versit module supports.
+    \li \l{icalsupport}{Supported iCalendar Features} document for a list of iCal features
+     that the Organizer Versit module supports.
+\endlist
+*/

@@ -1,0 +1,145 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+
+\page contactsactions.html
+
+\title Qt Contacts Action API
+
+\tableofcontents
+
+The Qt Contacts API supports the concept of a generic action which may be invoked
+upon an \l{QContactActionTarget}{action target} (e.g., a contact) or list thereof.
+The API allows clients to invoke an action upon a target (for example, to send an email
+to a contact) in a cross-platform manner, and allows third-party developers to provide
+platform-specific action plugins which may be used by clients.
+
+\section1 Invoking Actions upon Targets
+
+The client interface to actions consists of three classes: QContactAction, QContactActionTarget
+and QContactActionDescriptor.  A \l{QContactActionDescriptor}{descriptor} uniquely identifies
+a particular implementation of an \l{QContactAction}{action}, and allows the client to query
+meta-data about the action.  An \l{QContactActionTarget}{action target} consists of either a
+contact, a detail of a contact, or a list of details of a contact.
+
+The available actions may be queried by calling \l QContactAction::availableActions().  This
+function returns the list of names of actions which are provided by the given service name,
+or by any service if the parameter is omitted.
+
+There may be multiple implementations of any given action identified by a particular action
+name, since multiple third-party action providers could provide (for example) a "call" action,
+using various proprietary protocols and techologies.  Once the client knows which action they
+wish to perform on a contact, they can retrieve the list of action descriptors for that action
+by calling \l QContactAction::actionDescriptors() which takes the action name as a parameter.
+
+Note that there are several predefined action names including QContactAction::ActionCall,
+QContactAction::ActionEmail, QContactAction::ActionSms etc, however there is no guarantee
+that all of these actions are implemented on any given platform.
+
+Finally, once the client has selected a particular implementation of the action, by inspecting
+the action descriptor (from which they can retrieve meta-data and check that it supports the
+contact that they wish to perform the action on), the client may request a pointer to the
+action implementation by calling \l QContactAction::action() and passing the action descriptor
+as a parameter.  Note that the client takes ownership of the returned QContactAction
+pointer and must delete it to avoid leaking memory.  The caller is able to delete the action
+at any time, however doing so prior to when the action transitions to a finished state may
+have an undefined outcome depending on the implementation of the action.
+
+\section1 Implementing Actions
+
+If you are a third-party developer who wants to provide an action for other clients to use,
+you must do four things:
+\list
+\li Implement a QServicePluginInterface-derived class
+\li Implement a QContactActionFactory-derived class
+\li Implement (one or more) QContactAction-derived classes
+\li Write an XML file which describes your service plugin
+\endlist
+
+For more information on the QServicePluginInterface and the format of the service description
+XML, see the \l{Qt Service Framework}{Qt Service Framework} documentation.
+An example action plugin is provided later in this document.
+
+\note While the plugins are loaded by the Qt Service Framework,
+clients of the Qt Contacts Action API are entirely shielded from this implementation detail.
+
+The QContactActionDescriptor class is actually a client-facing interface to an action factory,
+which allows the factory to provide meta-data and other implementation-specific information
+to clients on demand.
+
+\section2 Other Considerations
+
+We recommend that action implementors provide values for the default meta-data keys (including
+icons and labels) documented in QContactActionDescriptor, to allow client applications to
+provide meaningful user interface elements to represent the action.
+
+We recommend that action implementors read the documentation of the
+\l{Qt Service Framework}{Qt Service Framework} carefully, to better understand
+how their implementation plugin may be updated with patch releases or major releases,
+and how these considerations affect the implementation of the plugin.
+
+\section2 Example Implementation
+
+The following snippet provides an example of an action plugin.  As previously described, the action
+plugin consists of a QServicePluginInterface, a QContactActionFactory, and one or more QContactAction
+derived classes.  The QServicePluginInterface-derived class merely instantiates the
+QContactActionFactory-derived class on request for the Qt Service Framework.  The
+QContactActionFactory-derived class then instantiates the actions when required.
+
+\snippet multiaction/multiaction_p.h Example Contact Action Plugin Declaration
+
+The implementation of these classes might be something like the following (example only):
+
+\snippet multiaction/multiaction.cpp Example Contact Action Plugin Implementation
+
+Once implemented, the plugin must be described by an XML file and installed in
+an appropriate location. For more information, see the Qt Service Framework
+documentation.
+
+\code
+<?xml version="1.0" encoding="utf-8" ?>
+<service>
+    <name>tst_qcontactactions:multiaction</name>
+    <filepath>plugins/contacts/libcontacts_multiaction</filepath>
+    <description>This service provides two test QContactAction implementations for testing purposes.  It is also an example of a single plugin providing multiple actions whose descriptors are identical except for their meta data.</description>
+    <interface>
+        <name>org.qt-project.Qt.SampleContactsActionPlugin</name>
+        <version>1.1</version>
+        <capabilities></capabilities>
+        <customproperty key="ActionName">call</customproperty>
+        <description>This plugin can instantiate two different QContactAction instances; one which provides the "call" action via the "sip" provider, the other which provides the "call" action via the "example proprietary protocol" provider.</description>
+    </interface>
+</service>
+\endcode
+
+\section2 Deploying Services
+
+Depending on the platform, the service which provides the action must be
+deployed in a certain way.
+
+*/

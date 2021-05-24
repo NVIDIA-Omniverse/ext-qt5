@@ -1,0 +1,57 @@
+#
+# Copyright (C) 2017 The Qt Company Ltd.
+# Contact: https://www.qt.io/licensing/
+#
+# This file is part of the automated tests of the Qt Toolkit.
+#
+# $QT_BEGIN_LICENSE:LGPL$
+# Commercial License Usage
+# Licensees holding valid commercial Qt licenses may use this file in
+# accordance with the commercial license agreement provided with the
+# Software or, alternatively, in accordance with the terms contained in
+# a written agreement between you and The Qt Company. For licensing terms
+# and conditions see https://www.qt.io/terms-conditions. For further
+# information use the contact form at https://www.qt.io/contact-us.
+#
+# GNU Lesser General Public License Usage
+# Alternatively, this file may be used under the terms of the GNU Lesser
+# General Public License version 3 as published by the Free Software
+# Foundation and appearing in the file LICENSE.LGPL3 included in the
+# packaging of this file. Please review the following information to
+# ensure the GNU Lesser General Public License version 3 requirements
+# will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
+#
+# GNU General Public License Usage
+# Alternatively, this file may be used under the terms of the GNU
+# General Public License version 2.0 or (at your option) the GNU General
+# Public license version 3 or any later version approved by the KDE Free
+# Qt Foundation. The licenses are as published by the Free Software
+# Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
+# included in the packaging of this file. Please review the following
+# information to ensure the GNU General Public License requirements will
+# be met: https://www.gnu.org/licenses/gpl-2.0.html and
+# https://www.gnu.org/licenses/gpl-3.0.html.
+#
+# $QT_END_LICENSE$
+#
+# This file contains the expected output of running the license checker
+# on this directory.
+#
+# Any comment or empty lines are ignored for the purposes of comparison.
+# The test numbers are also ignored (as long as the total count of tests
+# is as expected).
+
+1..13
+not ok x - QT_BEGIN_LICENSE does not follow Copyright block in bad/missing-license-info.qdoc, line 8
+not ok x - Mismatch in license text in bad/multiple-header-one-wrong.s
+not ok x - bad/noheader.cpp does not appear to contain a license header
+not ok x - bad/old-contact-info.cpp does not appear to contain a license header
+not ok x - Mismatch in license text in bad/wrong-lgpl-nokia.sh
+ok x - good/multiple-copyright-lgpl.g
+ok x - good/multiple-headers.cpp
+ok x - good/noheader.cpp
+ok x - good/not-all-rights-reserved-nokia.cpp
+ok x - good/typical-bsd-nokia.cpp
+ok x - good/typical-fdl-nokia.qdoc
+ok x - good/typical-lgpl-nokia.cpp
+ok x - good/typical-lgpl-only-nokia.bat

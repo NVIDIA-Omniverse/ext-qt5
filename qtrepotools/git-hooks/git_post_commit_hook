@@ -1,0 +1,42 @@
+#! /bin/sh
+# Copyright (C) 2015 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+# Usage: in every repository you want to have checked:
+#    cd .git/hooks
+#    ln -s /path/to/git_post_commit_hook post-commit
+#
+
+makeAbsolute() {
+    case $1 in
+        /*)
+            # already absolute, return it
+            echo "$1"
+            ;;
+        *)
+            # relative, prepend $2 made absolute
+            echo `makeAbsolute "$2" "$PWD"`/"$1" | sed 's,/\.$,,'
+            ;;
+    esac
+}
+
+me=$0
+if test -L "$me"; then
+    # Try GNU readlink(1)
+    nme=`readlink -nf "$me" 2>/dev/null`
+    if test -n "$nme"; then
+        me=$nme
+    else
+        # No GNU readlink(1), so let's try ls -l
+        base=`dirname "$me"`
+        me=`ls -l "$me" | sed 's/^.*-> //'`
+        me=`makeAbsolute "$me" "$base"`
+    fi
+fi
+
+sha1=${1-HEAD} # just for debugging
+exec `dirname "$me"`/sanitize-commit $sha1 strict >&2

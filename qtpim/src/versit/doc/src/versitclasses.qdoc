@@ -1,0 +1,52 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \module QtVersit
+    \title Qt Versit C++ Classes
+    \ingroup modules
+    \brief The QtVersit module provides classes for personal information
+    management.
+
+        The \l{Qt Versit} API allows you to take standard VCard and VCal
+    formatted test files and import your calendar or contact information into
+    the \l{Qt Organizer} and \l{Qt Contact} APIs, resepectively. Alternatively
+    the organizer and contacts information and export to VCal or VCard files
+    which you can then import into other calendars and contacts, or easily share
+    this with others through bluetooth or email, for example.
+
+    To include the definitions of the module's classes, use the following
+    directive:
+
+    \snippet doc_src_qtversit.cpp versit include
+    \snippet doc_src_qtversit.cpp versit organizer include
+
+    To link against the module, add this line to your \l qmake \c .pro file:
+
+    \snippet doc_src_qtversit.pro versit project modifications
+
+*/

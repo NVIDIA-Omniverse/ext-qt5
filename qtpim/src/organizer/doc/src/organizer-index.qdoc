@@ -1,0 +1,90 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt Toolkit.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \page qtorganizer-index.html
+    \title Qt Organizer
+    \brief Qt Organizer enables clients to fetch, update, or remove calendar,
+    scheduling and personal data from an organizer item manager.
+
+    Qt Organizer provides clients with the ability to access calendar,
+    schedule, and personal data in a platform-independent and datastore-agnostic
+    manner. This is achieved by defining generic personal information data
+    abstractions which can sufficiently describe calendar and scheduling data
+    stored in the native calendaring system of a platform.  Through the plugin
+    architecture, Qt Organizer can be used as a front-end API for any
+    calendaring system, such as an online calendar.
+
+    \section1 Getting Started
+
+    To include the definitions of the module's classes, use the following
+    directive:
+
+    \snippet doc_src_qtorganizer.cpp include
+
+    To use the C++ library in your application, add the following configuration
+    option to your \c .pro file:
+
+    \snippet doc_src_qtorganizer.pro organizer project modification
+
+    To use the classes of the module in your application, add the following
+    import statement to your \c .qml file:
+
+    \snippet moduleimports.qml Organizer import
+
+    \section1 Related Information
+
+        \section2 Guides
+        \list
+        \li \l{Qt Organizer Overview}
+        \li \l{Qt Organizer API Advanced Usage}
+        \li \l{Qt Organizer Asynchronous API}
+        \li \l{Qt Organizer Synchronous API}
+        \li \l{Qt Organizer Manager Engines}
+        \li \l{Qt Organizer C++ API} - overview of the C++ API
+        \li \l{Qt Organizer QML API} - overview of the QML API
+        \endlist
+
+        \section2 Reference
+        \list
+        \li \l{Qt Organizer C++ Classes} - list of C++ classes
+        \li \l{Qt Organizer QML Types} - list of QML types
+        \endlist
+
+        \section2 Examples
+
+        \list
+        \li \l{Qt Quick Organizer List View Example} - Import
+            event lists in iCalendar format, select a backend for volatile
+            memory or persistent storage, as well as list, add, edit, and remove
+            events.
+        \li \l{calendardemo}{Calendar Demo} -specify some simple events with
+            simple recurrence options and view the events.
+        \li \l{ToDo Example}
+        \endlist
+
+*/

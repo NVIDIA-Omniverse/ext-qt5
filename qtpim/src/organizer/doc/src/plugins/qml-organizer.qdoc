@@ -1,0 +1,127 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \qmlmodule QtOrganizer 5.0
+    \title Qt Organizer QML Types
+    \ingroup qmlmodules
+    \brief Provides QML types for handling calendar, schedule, and personal
+    data
+
+    The \l{Qt Organizer} module enables a client to request calendar, schedule
+    and personal data from local or remote backends. These QML types deliver
+    these capabilities in an easy to use form. The \l{Qt Organizer QML API}
+    page provides more information about the API.
+
+    To use the types, simply add the following to the QML
+    file:
+
+    \snippet moduleimports.qml Organizer import
+*/
+
+/*!
+    \page qml-organizer.html
+    \title Qt Organizer QML API
+    \brief A QML plugin for the Organizer API
+
+    \section1 Overview
+
+    To be able to use this component the QML \e {import} statement needs to
+    reference the module before it can used. Simply add the following to the QML
+    file:
+
+     \snippet moduleimports.qml Organizer import
+
+    The Organizer API enables a client to request calendar, schedule and
+    personal data from local or remote backends. The QML Organizer API
+    delivers these capabilities in an easy to use form.
+
+    The following describes the API. You can also study the \l{Qt Personal Information Management Examples}{Examples}
+    or try the \l{Qt Personal Information Management Tutorials}{Tutorials} to help get started quickly.
+
+    \section2 Organizer Items
+    The \l {OrganizerItem} type provides a generic interface for accessing
+    events, todos, journals and notes. To access specific fields
+    of an item, the \l {Event}, \l {Todo}, \l {Journal} and \l {Note} QML types
+    provide convenience. Additionally,
+    \l {EventOccurrence} and \l {TodoOccurrence} can be used for manipulating
+    occurrences of events or todos.
+
+    \section2 Recurring Items
+    A recurring item is an item that occurs more than once; for example, a
+    meeting that occurs every week for the next 10 weeks. A recurring item
+    is created by creating an Event or Todo and setting a \l {RecurrenceRule}
+    on it to specify the rules for when it should recur. See
+    \l {Recurrence} and \l {RecurrenceRule} for detail references.
+
+    \section2 Collections
+    Every item stored in an organizer store belongs to exactly one
+    collection. A collection can have properties such as a name, a "color",
+    a specified icon, a description, and so on. Collections may be added,
+    modified, or removed if the backend store supports those operations.
+    There will always be at least one (default) collection in an organizer
+    manager, into which items are saved if no other collection is specified.
+
+    \section2 Organizer Item Details
+    Several sub types of \l {Detail} are provided as part of the API.
+    They are general in design but are intended to fulfill specific use-cases.
+    Please note that certain backends may choose not to support one or more
+    of these QML types as they appear here.
+
+    \section2 Organizer Filters
+    The Organizer QML plugin supplies filters to search for organizer items
+    with particular values for various properties in the organizer item, such as
+    IDs, collections, and details, etc.
+
+    \section1 Reference documentation
+
+    \section2 Main Classes
+    \annotatedlist qml-organizer-main
+
+    \section2 Item Classes
+    \annotatedlist qml-organizer-items
+
+    \section2 Detail Leaf Classes
+    \annotatedlist qml-organizer-details
+
+    \section2 Item Selection And Sorting
+    \annotatedlist qml-organizer-filters
+
+    \section2 Examples
+
+    The following sample applications show examples of API usage:
+    \list
+        \li \l{qmlorganizerlistview}{Qt Quick Organizer List view}
+    \endlist
+
+    \section2 Tutorials
+
+    The following tutorials are useful to work through the use of the Qt Quick Organizer API::
+    \list
+        \li \l{Organizer Qt Quick ListView Tutorial}{Qt Quick Organizer List view Tutorial}
+    \endlist
+*/

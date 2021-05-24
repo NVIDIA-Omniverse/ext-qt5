@@ -1,0 +1,1044 @@
+#! /usr/bin/perl
+# Copyright (C) 2017 The Qt Company Ltd.
+# Copyright (C) 2014 Petroules Corporation.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+use warnings;
+use Config;
+use Cwd;
+use Encode;
+use File::Spec qw(path);
+use List::Util qw(first any);
+
+if ($#ARGV < 0 or $#ARGV > 3 or ($#ARGV >= 1 && $ARGV[1] !~ /^(easy|strict|gerrit-rest)$/)) {
+    print STDERR "Usage: $0 <sha1> [{easy|strict|gerrit-rest} [<instance> [<branch>]]]\n";
+    exit 2;
+}
+my $sha1 = $ARGV[0];
+my $gerrit_rest = ($#ARGV >= 1 && $ARGV[1] eq "gerrit-rest");
+my $strict = $gerrit_rest || ($#ARGV >= 1 && $ARGV[1] eq "strict");
+my $instance = ($#ARGV >= 2) ? $ARGV[2] : "default";
+my $target = $#ARGV == 3 && $ARGV[3];
+
+my $repo = getcwd();
+$repo =~ s,/?\.git$,,;
+$repo =~ s,^.*/,,;
+my %config = ();
+for (`git config --list`) {
+    if (/^sanity\.\Q$repo\E\.([^=]+)=(.*$)/) {
+        $config{$1} = $2;
+    } elsif (/^sanity\.\Q$instance\E\.([^=]+)=(.*$)/) {
+        $config{$1} = $2;
+    }
+}
+
+my %cfg = ();
+if (defined $ENV{GIT_PUSH}) {
+    foreach my $c (split ",", $ENV{GIT_PUSH}) {
+        $cfg{$c} = 1;
+    }
+}
+if (defined $config{flags}) {
+    foreach my $c (split ",", $config{flags}) {
+        $cfg{$c} = 1;
+    }
+}
+# The whitelist is space-separated, supporting double-quoted strings with spaces.
+# Remember to backslash-escape the quotes if you edit .gitconfig manually.
+my %good_names;
+$_ = decode_utf8($config{goodnames} || "");
+$good_names{$1 || $2} = 1 while (/(\w+)|\"([^\"]+)\"/g);
+my $fail = 0;
+my $file = "!!!!!";
+my $lineno = 0;
+my $summary;
+# Hash (by file) of hashes (by line) of lists (reports) of lists (msg, extra)
+my %complaints;
+my %footnotes;
+
+sub parse_bool($)
+{
+    return !($_[0] =~ /^(?:false|no|0)$/i);
+}
+
+sub printerr()
+{
+  die "cannot run git: ".$! if ($? < 0);
+  die "git crashed with signal ".$? if ($? & 127);
+  die "git exited with status ".($? >> 8) if ($?);
+}
+
+sub do_complain($$$;$@)
+{
+    my ($line, $msg, $key, $level, @extra) = @_;
+
+    $level = 0 if (!defined($level) || ($level < 0 && $strict && length($key)));
+    if ($level >= 0) {
+        $fail = $level + 1 if ($level >= $fail);
+        $msg .= " (key \"".$key."\")" if (!$gerrit_rest);
+    } else {
+        $msg = "Hint: ".$msg;
+    }
+    my $fn = $line < 0 ? "" : $file;
+    push @{$complaints{$fn}{$line}}, [ $msg, @extra ];
+}
+
+sub complain($$;$)
+{
+    my ($msg, $key, $level) = @_;
+    do_complain(0, $msg, $key, $level);
+}
+
+sub complain_ln($$;$)
+{
+    my ($msg, $key, $level) = @_;
+    do_complain($lineno, $msg, $key, $level);
+}
+
+sub complain_cln($$;$)
+{
+    my ($msg, $key, $level) = @_;
+    do_complain($gerrit_rest ? $lineno : 0, $msg, $key, $level);
+}
+
+use constant {
+    STS_BLANK => 0,     # Empty lines except after footer
+    STS_TEXT => 1,      # Non-footer text
+    STS_FOOTER => 2,    # Footer
+    STS_FTR_BLNK => 3   # Empty lines after footer
+};
+
+my $clike = 0;
+my $qmake = 0;
+my $spell_check = !defined($cfg{spell});
+
+# Load spelling errors dataset if available
+our %MISTAKES;
+our %MISTAKES_BASE;
+BEGIN {
+    eval { require Lingua::EN::CommonMistakes };
+    if (!$@) {
+        # Load US-specific and non-US-specific mistakes so we can give a hint
+        # about US vs British English where appropriate
+        Lingua::EN::CommonMistakes->import(qw(:no-punct %MISTAKES_BASE));
+        Lingua::EN::CommonMistakes->import(qw(:american :no-punct %MISTAKES));
+    }
+}
+
+my @spell_fails;
+
+sub complain_spelling()
+{
+    if (@spell_fails) {
+        do_complain(1e9, "Possible spelling errors", "spell", 0, @spell_fails);
+        @spell_fails = ();
+    }
+}
+
+# Given a line of text, searches for likely spelling errors.
+sub check_spelling()
+{
+    return if (!%MISTAKES_BASE);
+
+    my %seen;
+    my (@words) = split(/\b/);
+    foreach my $word (@words) {
+        $word = lc $word;
+        next if $seen{$word};
+        $seen{$word} = 1;
+        if (my $correction = $MISTAKES{$word}) {
+            if ($word eq 'nam') {
+                # Ignore if in a fragments commonly used in "Lorem ipsum" texts:
+                next if (/\bNam eget dui\b/ || /\bNam quam nunc\b/);
+            }
+            my $sfx = "";
+            if (!$MISTAKES_BASE{$word}) {
+                $sfx = ' [*]';
+                $footnotes{'[*] Please note, Qt prefers American English.'} = 1;
+            }
+            if ($gerrit_rest) {
+                complain_ln("$word -> $correction?$sfx", "spell");
+            } else {
+                push @spell_fails, "  $lineno: $word -> $correction$sfx";
+            }
+        }
+    }
+}
+
+my $seenIdentify; # Cached result of PATH check
+sub haveIdentify()
+{
+    $seenIdentify = defined(first { $_ && -x "$_/identify$Config{_exe}" } File::Spec->path())
+        unless defined($seenIdentify);
+    return $seenIdentify;
+}
+
+sub dodgyPng($$)
+{
+    # Not uncommonly, PNGs get generated with a bogus sRGB chunk; this
+    # can readily be removed using pngcrush, eliminating the warning
+    # from identify.  This check may find other kinds of errors; we'll
+    # have to learn how to fix those when we meet them.  The identify
+    # program is part of the ImageMagick package.
+    my ($commit, $file) = @_;
+    my $err = `git cat-file blob "$commit:$file" 2>/dev/null | \
+                identify - 2>&1 1>/dev/null`;
+    return $err =~ m/\bMagickPNGWarningHandler\b/;
+}
+
+my @style_fails = ();
+
+sub styleFail($)
+{
+    my $why = shift;
+    if ($gerrit_rest) {
+        complain_ln("$why", "style", -1);
+    } else {
+        push @style_fails, "  $lineno: ".$why;
+    }
+}
+
+sub complain_style()
+{
+    if (@style_fails) {
+        do_complain(1e9, "Style issues", "style", -1, @style_fails);
+        @style_fails = ();
+    }
+}
+
+sub check_email($$$$)
+{
+    my ($real, $addr, $line, $label) = @_;
+
+    if ($addr =~ /\.\(none\)$/) {
+        if ($gerrit_rest) {
+            do_complain($line, "Bogus address", "email", 1);
+        } else {
+            do_complain(-1, "Bogus $label address", "email", 1);
+        }
+    }
+    if ($addr =~ /\@theqtcompany\.com$/) {
+        if ($gerrit_rest) {
+            do_complain($line, "Obsolete domain. Please update to qt.io.", "email", 1);
+        } else {
+            do_complain(-1, "Obsolete domain in $label address. Please update to qt.io.", "email", 1);
+        }
+    }
+    # UTF-8 is a pretty safe bet - all modern Unix systems use it, and
+    # when not printing to a Windows console, msysgit also uses it.
+    eval { $real = decode_utf8($real, Encode::FB_CROAK); };
+    return if ($@);
+    # We complain about names which
+    # - contain no spaces
+    # - have words starting with lowercase (except for common Nobiliary particles)
+    # - have single letters not followed by a dot or apostrophe
+    if (!defined($good_names{$real}) && ($real !~ / / || $real =~ /\b(?!da|de|du|d'|la|van|von)\p{Ll}|\b\pL([^.'\pL]|$)/)) {
+        if ($gerrit_rest) {
+            do_complain($line, "Suspicious real name", "email");
+        } else {
+            do_complain(-1, "Suspicious $label real name", "email");
+        }
+    }
+}
+
+sub check_apple_terminology()
+{
+    if ($clike) {
+        if (/\bQ_OS_MAC\b.*&&.*!.*\bQ_OS_IOS\b/) {
+            complain_ln("Use of deprecated idiom 'defined(Q_OS_MAC) && !defined(Q_OS_IOS)';" .
+                        " use Q_OS_OSX instead", "terminology");
+        }
+
+        if (/\bQ_OS_MAC\b/) {
+            complain_ln("Using deprecated define Q_OS_MAC; use Q_OS_MACOS (for macOS only)" .
+                        " or Q_OS_DARWIN (for all Apple platforms) instead", "terminology");
+        }
+
+        if (/\bQ_OS_MACX\b/) {
+            complain_ln("Using deprecated define Q_OS_MACX; use Q_OS_MACOS instead", "terminology");
+        }
+
+        if (/\bQ_OS_OSX\b/) {
+            complain_ln("Using deprecated define Q_OS_OSX; use Q_OS_MACOS instead", "terminology");
+        }
+    } elsif ($qmake) {
+        # check qmake scopes
+        if (s/\bmac\s*:\s*!\s*ios\b/X/) {
+            complain_ln("Use of deprecated idiom 'mac:!ios', use 'macos' instead", "terminology");
+        }
+
+        if (s/^([^#]*)\bmac\b( *[|:{])/$1X$2/) {
+            complain_ln("Using deprecated qmake scope 'mac': use 'macos' (for macOS only)" .
+                        " or 'darwin' (for all Apple platforms) instead", "terminology");
+        }
+
+        # Match the word macx but avoid matching macx- and macx* since these are valid for mkspecs
+        if (/\bmacx\b(?![-*])/) {
+            complain_ln("Using deprecated qmake scope 'macx'; use 'macos' instead", "terminology");
+        }
+
+        if (/\bosx\b/) {
+            complain_ln("Using deprecated qmake scope 'osx'; use 'macos' instead", "terminology");
+        }
+    }
+
+    if (/\bMacOS\b/ or /\bOS[\s]*X\b/ or /\bmacintosh\b/i) {
+        complain_ln("Possible incorrect use of Apple-related terminology; " .
+                    "the correct name of Apple's desktop operating system is 'macOS'", "", -1);
+    }
+}
+
+# The hard-coded fallbacks could be avoided by init-repository setting things up.
+my $with_pickbot = parse_bool($config{'with-pickbot'} // "false");
+my @LTS = split(/\s+/, $config{'lts-branch'} || "5.6 5.9 5.12");
+
+my %allHeads = ();
+my %nonDevHeads = ();
+my $foundLts = 0;
+my $foundDev = 0;
+my $seenOrigin = 0;
+open HEADS, '-|', 'git', 'for-each-ref',
+                  '--format=%(objectname) %(refname)',
+                  'refs/heads/', 'refs/remotes/origin/' or die "cannot run git: $!";
+while (<HEADS>) {
+    last if (!m,^([[:xdigit:]]{40}) refs/(.*),);
+    my ($rev, $name) = ($1, $2);
+    if ($name =~ s,^remotes/,,) {
+        if (!$seenOrigin) {
+            ($foundDev, $foundLts, %allHeads, %nonDevHeads) = (0, 0);
+            $seenOrigin = 1;
+        }
+    } elsif ($seenOrigin) {
+        next;
+    }
+    if ($name =~ m,/dev$,) {
+        $foundDev = 1;
+    } elsif ($name =~ m,/(\d+(?:\.\d+)+)$,) {
+        my $branch = $1;
+        ONCE: while (1) {
+            foreach my $lts (@LTS) {
+                if ($branch =~ /^\Q$lts\E(?:\.|$)/) {
+                    $foundLts = 1;
+                    push(@{$nonDevHeads{$lts}}, $rev);
+                    last ONCE;
+                }
+            }
+            push(@{$nonDevHeads{''}}, $rev);
+            last;
+        }
+    } elsif ($name !~ m,/master$,) {
+        next;
+    }
+    $name =~ s,^[^/]+/,,;  # Strip heads/ or origin/
+    $allHeads{$name} = $rev;
+}
+close HEADS;
+printerr;
+
+my $handleLts = 0;
+my $ltsForSha1 = '';
+if (!$with_pickbot && $foundDev && $foundLts) {
+    $handleLts = 1;
+    if (defined($target)) {
+        $ltsForSha1 = $1 if ($target =~ /^(\d+\.\d+)/ && any { $1 eq $_ } @LTS);
+    } else {
+        chomp(my $sha1Base = `git merge-base $sha1 $allHeads{dev}`);
+        foreach my $lts (@LTS) {
+            next if (!defined($nonDevHeads{$lts}));
+            my $key = "cached-lts-$lts-fork";
+            $key =~ s/\./-/g;  # so the dot in $lts isn't a section name boundary in the key
+            my $diverge = $config{$key};
+            if (!$diverge) {
+                chomp($diverge = `git merge-base $allHeads{$lts} $allHeads{dev}`);
+                system("git config sanity.$instance.$key $diverge");
+            }
+            if ($sha1Base eq $diverge) {
+                $ltsForSha1 = $lts;
+                last;
+            }
+        }
+    }
+}
+
+sub check_cherry_pick($)
+{
+    my ($orig) = @_;
+
+    if ($handleLts) {
+        my @sources;
+        foreach my $br (keys %nonDevHeads) {
+            push @sources, @{$nonDevHeads{$br}} if ($br ne $ltsForSha1);
+        }
+        if (@sources) {  # Expected to be always true ...
+            # git creates a hypothetical merge between the sources, so
+            # valid commits will lie in the ancestry of this merge,
+            # making the commit itself the best merge base.
+            chomp(my $origBase = `git merge-base $orig @sources 2> /dev/null`);
+            return if ($origBase eq $orig);
+        }
+    } elsif (!$with_pickbot) {
+        # The general policy when no LTS branch is present.
+        # No line, so people are less likely to get stupid ideas.
+        complain("Cherry-picks are strongly discouraged", "cherry");
+    }
+    return if (!%allHeads);  # Some truly weird repo
+    my @allHds = values %allHeads;
+    chomp(my $origBase = `git merge-base $orig @allHds 2> /dev/null`);
+    if ($origBase ne $orig) {
+        # Most likely not integrated yet, but may also be a wip/ branch.
+        complain_ln("Cherry-pick's source is not an upstream commit", "cherry", 1);
+    } elsif ($handleLts) {
+        complain("Cherry-pick will be subsequently merged with its source branch", "cherry");
+    }
+}
+
+my $havecherry = defined($cfg{cherry});
+my $badlog = defined($cfg{log});
+my $badurl_rx = $config{badurl};
+my $badurl = !defined($badurl_rx) || defined($cfg{url});
+my $badid = defined($cfg{changeid});
+my $badrev = 0;
+my $badsign = 0;
+my $parents = 0;
+my $inchangelog = 0;
+my $doftr = !defined($cfg{footer});
+my ($footer, $cherry) = (STS_BLANK, 0);
+my ($revert1, $revert2, $nonrevert) = (0, 0, 0);
+my $msgline = 0;
+my %picktos = ();
+open MSG, "git cat-file -p ".$sha1." |" or die "cannot run git: $!";
+while (<MSG>) {
+    last if ($_ eq "\n");
+    if (/^parent /) {
+        $parents++ ;
+    } elsif (/^author ([^<]*?) *<([^>]+)/) {
+        check_email($1, $2, $parents + 1, "author");
+    } elsif (/^committer ([^<]*?) *<([^>]+)/) {
+        check_email($1, $2, $parents + 3, "committer");
+    }
+}
+while (<MSG>) {
+    chomp;
+    $lineno++;
+    $msgline++;
+    if ($msgline == 1) {
+        $summary = $_;
+        $lineno = $parents + 6 if ($gerrit_rest);
+        $revert1 = 1 if (/^Revert ".*"$/);
+        if (/^revert(ed|ing)? (commit )?[0-9a-f]{7,40}\.?$/i) {
+            complain_cln("Summary of revert mentions only SHA1", "log");
+            # TODO: confirm reverted commit is real
+        }
+        if (/\bQT[A-Z]+-\d+\b/) {
+            complain_cln("Bug reference in summary", "log");
+        }
+        if (/(?<!etc)\.$/) {
+            complain_cln("Summary ends with period", "log");
+        }
+        # Detect wrong tense, but exclude cases like 'Speed up ...'
+        if (s/^[^:]+: //r =~ /^\w+(ing|[^e](ed)|es)\s/) {
+            complain_cln("Summary does not use imperative mood", "log");
+        }
+        if (!$badlog && length($_) < 7) {
+            complain_cln("Summary is too short", "log");
+        } elsif (!$badlog && !$revert1 && length($_) > 120) {
+            complain_cln("Summary is excessively long", "log");
+        } elsif ($parents < 2 && !$revert1 && length($_) > 72) {
+            complain_cln("Aim for shorter summaries", "", -1);
+        }
+    } else {
+        if (/^This reverts commit [[:xdigit:]]{40}\.?$/) {
+            $revert2 = 1;
+        } elsif (!/^[-\w]+:|^$/) {
+            $nonrevert = 1;
+        }
+        if ($msgline == 2) {
+            if (!$badlog && $_ ne "") {
+                complain_cln("2nd line is not empty", "log");
+            }
+        } elsif ($_ eq "") {
+            $cherry = 0;
+            $inchangelog = 0;
+            # Empty line following footer(s).
+            $footer = ($footer == STS_FOOTER) ? STS_FTR_BLNK : STS_BLANK;
+        } elsif ($cherry) {
+            $cherry = 0 if (/\)/);
+        } else {
+            my $ftr = 0;
+            if (/^\((?:partial(?:ly)? )?(?:cherry[- ]pick|(?:back-?)?port|adapt)(?:ed)?(?: from| of)?(?: commit)? (\w+\/)?([[:xdigit:]]{7,40})/) {
+                if (!$1) {
+                    check_cherry_pick($2) if (!defined($cfg{cherry}));
+                    $havecherry = 1;
+                } elsif ($with_pickbot) {
+                    $havecherry = 1;
+                }
+                $cherry = 1 if (!/\)/);
+                # Some bad footers are ok above cherry-pick lines.
+                $badrev = 0;
+                $badsign = 0;
+                # cherry-pick lines count as footers as well.
+                $ftr = 1;
+                $inchangelog = 0;
+            } elsif (/^(?:[A-Z][A-Za-z]+(?:-[A-Za-z][a-z]+)+|F[Ii][Xx][Ee][Ss]|C[Hh][Aa][Nn][Gg][Ee][Ll][Oo][Gg]): /) {
+                $ftr = 1;
+                $inchangelog = 0;
+                if (/^Change-?Log:/i) {
+                    complain_ln("Use [ChangeLog] tag instead", "changelog") if (!defined($cfg{changelog}));
+                } elsif (/^Reviewed-by:/i) {
+                    $badrev = $lineno;
+                } elsif (/^Signed-off-by:/i) {
+                    $badsign = $lineno;
+                } elsif (/^Task-number: *(.*)/i) {
+                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
+                    complain_ln("Capitalization of \"Task-number\" is wrong", "") if (!/^Task-number:/);
+                } elsif (/^Fixes: *(.*)/i) {
+                    complain_ln("Multiple tasks in one footer", "") if ($1 =~ /[ ,]/);
+                    complain_ln("Capitalization of \"Fixes\" is wrong", "") if (!/^Fixes:/);
+                } elsif (/^Pick-to: *(.*)/i) {
+                    for my $pick (split(/\s+/, $1)) {
+                        $picktos{$pick} = 1;
+                        if (!defined($allHeads{$pick})) {
+                            complain_ln("Pick-to entry '$pick' is not a valid branch in $repo",
+                                        "pickto", 1);
+                        } elsif (defined($target) && ($pick eq $target)) {
+                            complain_ln("Pick-to entry '$pick' equals source branch",
+                                        "pickto", 1)
+                        }
+                    }
+                    complain_ln("Capitalization of \"Pick-to\" is wrong", "") if (!/^Pick-to:/);
+                }
+            } elsif (/^\[change-?log\]/i) {
+                $inchangelog = 1;
+                if (!/^\[ChangeLog\]/ && !defined($cfg{changelog})) {
+                    complain_ln("Bad form of [ChangeLog] tag", "changelog");
+                }
+            }
+            if ($inchangelog) {
+                complain_ln("Missing space between ChangeLog tags and text", "changelog") if (/\][^\s\[]/);
+                complain_ln("JIRA task referenced from ChangeLog", "changelog") if (/\[QT[A-Z]+-\d+\]/);
+                complain_ln("Redundant repository reference in ChangeLog", "", -1) if (/\[\Q$repo\E\]/i);
+                # Note that this is not mutually exclusive with the else-branch below -
+                # a ChangeLog section is just regular text.
+            }
+            if ($ftr && $doftr) {
+                if ($footer == STS_TEXT) {
+                    complain_ln("Missing empty line between text and footers", "footer");
+                } elsif ($footer == STS_FTR_BLNK) {
+                    do_complain($lineno - 1, "Empty lines between footers", "footer");
+                }
+                $footer = STS_FOOTER;
+            } else {
+                if ($footer == STS_FOOTER || $footer == STS_FTR_BLNK) {
+                    complain_ln("Text following footers", "footer");
+                }
+                $footer = STS_TEXT;
+            }
+        }
+    }
+
+    if (!$badid && /\bI[0-9a-f]{40}\b/ && !/^Change-Id: /) {
+        complain_ln("Gerrit change id outside Change-Id footer", "changeid");
+    }
+    if (!$badurl && /$badurl_rx/o) {
+        complain_ln("URL pointing to Gerrit or JIRA", "url");
+    }
+    check_spelling() if ($spell_check);
+    check_apple_terminology();
+    styleFail("Trailing whitespace") if (s/[ \t]+\r?$//);
+    styleFail("Space indent followed by a TAB character") if (/^ +\t/);
+    styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
+}
+close MSG;
+printerr;
+
+if ($revert1 && $revert2 && !$nonrevert) {
+    complain("Revert without explanation", "revert", 1);
+}
+if ($badrev && !defined($cfg{revby})) {
+    do_complain($badrev, "Bogus Reviewed-by footer", "revby", 1);
+}
+if ($badsign) {
+    do_complain($badsign, "Unnecessary Signed-off-by footer", "", -1);
+}
+if ($with_pickbot) {
+    if ($havecherry) {
+        if (%picktos) {
+            complain("Leftover Pick-to footer in commit message of cherry-picked change",
+                     "cherry", 1);
+        }
+    } else {
+        my $onDev;
+        my $masterName = $foundDev ? "dev" : "master";
+        if (defined($target)) {
+            $onDev = ($target eq $masterName) || ($target =~ m,^wip/,);
+        } else {
+            my $masterRev = $allHeads{$masterName};
+            chomp(my $sha1Base = `git merge-base $sha1 $masterRev`);
+            # Catch both ancestor and descendant cases.
+            $onDev = ($sha1Base eq $sha1 || $sha1Base eq $masterRev);
+        }
+        if (!$onDev) {
+            if (%picktos) {
+                if (exists($picktos{$masterName})) {
+                    complain("Picking downward from $masterName is preferred", "", -1);
+                } else {
+                    complain("Omission of $masterName from Pick-to footer might be incorrect",
+                             "", -1);
+                }
+            } else {
+                complain("Omission of Pick-to footer is probably incorrect", "cherry");
+            }
+        }
+    }
+} elsif (!$havecherry && length($ltsForSha1)) {
+    complain("Commit on LTS branch is not a cherry-pick", "cherry");
+}
+
+complain_spelling();
+complain_style();
+
+my $chunk = 0;
+my @addi = ();
+my @deli = ();
+my $nonws;
+my $ws;
+my $mixws_check = 0;
+my %ws_lines = (); # hash of lists
+my $braces = 0;
+my $open_key = qr/\s*#\s*if|.*{/;
+my $close_key = qr/\s*#\s*endif|.*}/;
+my $kill_all_ws = qr/\s+((?:\"(?:\\.|[^\"])*\"|\S)+)/; # Collapse all whitespace not inside strings.
+my $kill_nl_ws = qr/((?:\"(?:\\.|[^\"])*\"|\S)+)\s+/; # Collapse all non-leading whitespace not inside strings.
+
+$lineno = 0;
+
+sub flushChunk()
+{
+    my $loc_nonws = 0;
+    my $nlonly = 1;
+    my ($ai, $di) = (0, 0);
+    while (!$loc_nonws) {
+        my ($a, $d) = ("", "");
+        while ($ai < @addi) {
+            $a = $addi[$ai++];
+            $a =~ s/\s+$//;
+            if (length($a)) {
+                $nlonly = 0;
+                last;
+            }
+        }
+        while ($di < @deli) {
+            $d = $deli[$di++];
+            $d =~ s/\s+$//;
+            if (length($d)) {
+                $nlonly = 0;
+                last;
+            }
+        }
+        last if (!length($a) && !length($d));
+
+        $a =~ /^$close_key/o and $braces--;
+        $d =~ /^$close_key/o and $braces++;
+        if ($braces) {
+            $a =~ s/$kill_nl_ws/$1/go;
+            $d =~ s/$kill_nl_ws/$1/go;
+        } else {
+            $a =~ s/$kill_all_ws/$1/go;
+            $d =~ s/$kill_all_ws/$1/go;
+        }
+        $loc_nonws = 1 if ($a ne $d);
+        $a =~ /^$open_key/o and $braces++;
+        $d =~ /^$open_key/o and $braces--;
+    }
+    while ($ai < @addi) {
+        my $a = $addi[$ai++];
+        $a =~ /^$close_key/o and $braces--;
+        $a =~ /^$open_key/o and $braces++;
+    }
+    while ($di < @deli) {
+        my $d = $deli[$di++];
+        $d =~ /^$close_key/o and $braces++;
+        $d =~ /^$open_key/o and $braces--;
+    }
+    if ($loc_nonws) {
+        $nonws = 1;
+    } elsif (!$nlonly) {
+        $ws = 1;
+        push @{$ws_lines{$file}}, $lineno - $#addi;
+    }
+    @addi = @deli = ();
+    $chunk = 0;
+}
+
+sub formatSize($)
+{
+    my $sz = shift;
+    if ($sz >= 10 * 1024 * 1024) {
+        return int($sz / (1024 * 1024))."MiB";
+    } elsif ($sz >= 10 * 1024) {
+        return int($sz / 1024)."KiB";
+    } else {
+        return int($sz)."B";
+    }
+}
+
+sub isExe($)
+{
+    my $sha = shift;
+    open(my $hndl, "git cat-file -p $sha |") or return 0;
+    read($hndl, my $hdr, 4) or return 0;
+    return $hdr =~ /^(\x7FELF|MZ)/;
+}
+
+my $no_copyright = 0;
+
+sub flushFile()
+{
+    if ($no_copyright && $lineno > ($file =~ /^tests\/.*\.qml$/ ? 20 : 10)) {
+        complain("Missing copyright header", "copyright");
+    }
+    complain_spelling();
+    complain_style();
+}
+
+my $merge;
+my $new_file;
+my $is_bin;
+my $maybe_bin;
+my $is_special;
+my $need_hash_bang;
+my $size;
+my $check_gen = 0;
+my $crlf_fail;
+my $in_plus;
+my $conflict_fail;
+my $tabs_check;
+my $ws_check;
+my $allow_2spaces;
+my $tsv_check;
+my $eof_check;
+my $ctlkw_check;
+my $apple_check;
+open DIFF, "git diff-tree --minimal --no-commit-id --diff-filter=ACMR --ignore-submodules " .
+    "--src-prefix=\@old\@/ --dst-prefix=\@new\@/ --full-index -r -U100000 --cc -C -l1000 " .
+    "--root ".$sha1." |" or die "cannot run git: $!";
+while (<DIFF>) {
+    if (/^-/) {
+        if ($mixws_check) {
+            /^--- / and next;
+            push @deli, substr($_, 1);
+            $chunk = 1;
+        }
+        $in_plus = 0;
+        next;
+    }
+    if ($lineno < 50) {
+        if ($no_copyright && /Copyright/) {
+            $no_copyright = 0;
+        }
+        if ($check_gen && /All changes made in this file will be lost|This file is automatically generated|DO NOT EDIT|DO NOT delete this file|[Gg]enerated by|uicgenerated|produced by gperf|made by GNU Bison/) {
+            complain("Adding generated file (inferred from line ".($lineno + 1).")", "generated")
+                if ($new_file && !defined($cfg{generated}));
+            $ws_check = 0;
+            $check_gen = 0;
+        }
+    }
+    if (/^\+/) {
+        if (/^\+\+\+ /) {
+            # This indicates a text file; binary files have "Binary files ... and ... differ" instead.
+            $maybe_bin = 0;
+            if ($file =~ /(~|\.(old|bak))$/i) {
+                complain("Adding backup file", "backup") if ($new_file && !defined($cfg{backup}));
+                $ws_check = 0;
+            } elsif ($file =~ m,^tests/.*/(perf|test)?data[/_-],) {
+                $ws_check = $eof_check = $apple_check = $no_copyright = 0;
+            } elsif ($file =~ /\.(prl|la|pc|ilk)$/i) {
+                complain("Adding build artifact", "generated") if ($new_file && !defined($cfg{generated}));
+                $ws_check = 0;
+            } elsif ($file !~ /\.qmltypes$/i) {
+                $check_gen = 1;
+            }
+            next;
+        }
+        next if ($is_bin);
+        $lineno++;
+        if ($merge) {
+            # Consider only lines which are new relative to both parents, i.e., were added during the merge.
+            s/^\+\+// or next;
+        } else {
+           $_ = substr($_, 1);
+            if ($mixws_check) {
+                push @addi, $_;
+                $chunk = 1;
+            }
+        }
+        if ($lineno == 1 && $need_hash_bang) {
+            if (/^#! ?\//) {
+                $need_hash_bang = 0;
+            } else {
+                # Can still be valid if run via the right interpreter, so level -1:
+                complain("Executable file with no initial #! line", "permissions", -1);
+            }
+        }
+        $in_plus = 1;
+        if (!$crlf_fail && /\r\n$/) {
+            $crlf_fail = 1;
+            if ($lineno != 1) {
+                # A stray CRLF somewhere in the middle.
+                complain_ln("CRLF line endings", "crlf");
+            } else {
+                # Assume that the whole file is affected.
+                complain("CRLF line endings", "crlf");
+            }
+        }
+        if (!$conflict_fail && /^(?:[<>=]){7}( |$)/) {
+            complain_ln("Unresolved merge conflict", "conflict");
+            $conflict_fail = 1;
+        }
+        if ($ws_check) {
+            if ($tsv_check) {
+                styleFail("Mixing spaces with TABs") if (/^ +\t|\t +/);
+            } else {
+                if ($allow_2spaces) {
+                    s/(?<=\S)  (?=\r?\n$)//;
+                }
+                styleFail("Trailing whitespace") if (s/[ \t]+\r?\n$//);
+                styleFail("Space indent followed by a TAB character") if (/^ +\t/);
+                styleFail("TAB character in non-leading whitespace") if (/\S *\t/);
+                if ($tabs_check) {
+                    styleFail("Leading tabs") if (/^\t+/);
+                    if ($ctlkw_check) {
+                        styleFail("Flow control keywords must be followed by a single space")
+                           if (/\b(if|elsif|for|foreach|Q_FOREACH|while|do|switch)(|  +)\(/);
+                    }
+                }
+            }
+        }
+        check_spelling() if ($spell_check);
+        check_apple_terminology() if ($apple_check);
+    } else {
+        flushChunk() if ($chunk);
+        if (/^ /) {
+            $lineno++ if (!$merge || !/^ -/);
+            $in_plus = 0;
+            next;
+        }
+        if ($eof_check && !$is_special && $in_plus && /^\\ No newline/) {
+            complain("No newline at end of file", "fileend");
+            next;
+        }
+        if ($merge ? /^\@\@\@ -\S+ -\S+ \+(\d+)/ : /^\@\@ -\S+ \+(\d+)/) {
+            $lineno = $1 - 1;
+            next;
+        }
+        if (/^diff /) {
+            flushFile();
+            if (/^diff --git \@old\@\/.+ \@new\@\/(.+)$/) {
+                $merge = 0;
+            } elsif (/^diff --cc (.+)$/) {
+                $merge = 1;
+            } else {
+                print STDERR "Warning: cannot parse diff header: ".$_;
+                next;
+            }
+            $file = $1;
+            #print "*** got file ".$file.".\n";
+            $clike = ($file =~ /\.(c|cc|cpp|c\+\+|cxx|qdoc|m|mm|h|hpp|hxx|cs|java|js|qs|qml|g|y|ypp|pl|glsl)$/i);
+            $qmake = ($file =~ /\.pr[filo]$/i);
+            $is_bin = ($file =~ /\.(ps|pdf)$/);
+            my $foreign = $is_bin || ($file =~ /(^|\/)3rdparty\//);
+            $new_file = 0;
+            $maybe_bin = 0;
+            $is_special = 0;
+            $need_hash_bang = 0;
+            $crlf_fail = $is_bin || defined($cfg{crlf});
+            $in_plus = 0;
+            $mixws_check = !$merge && !$foreign && $clike && !defined($cfg{mixws});
+            $ws_check = !defined($cfg{style}) && !$foreign && ($file !~ /\.(ts|diff|patch)$|^\.gitmodules$/);
+            $tsv_check = $ws_check && ($file =~ /((^|\/)objects\.map$|\.tsv$)/);
+            $tabs_check = $ws_check && !$tsv_check && !defined($cfg{tabs})
+                && ($file !~ /((^|\/)Makefile\b|debian[.\/]rules|\.(pbxproj|plist(\.[^.\/]+)?|def|mk|spec|changes|[xn]ib|storyboardc?|go|svg|ui[ap])(?:\.in)?$)/);
+            $allow_2spaces = $ws_check && ($file =~ /\.md$/);
+            $ctlkw_check = $tabs_check && $clike;
+            $eof_check = !defined($cfg{fileend}) && !$foreign
+                && ($file !~ /(\.plist(\.[^.\/]+)?|\.xcassets\/.*\.json)$/); # Xcode consistently forgets the trailing newline
+            # .ts files usually contain languages other than English
+            $spell_check = !defined($cfg{spell}) && !$foreign && ($file !~ /\.ts$/i);
+            $apple_check = !$foreign && ($file !~ /\.ts$/i);
+            $conflict_fail = $is_bin || defined($cfg{conflict});
+            $braces = 0;
+            $check_gen = 0;
+            $no_copyright = 0;
+            next;
+        }
+        if ($maybe_bin && /^Binary files /) {
+            if ($new_file) {
+                if (!defined($cfg{generated}) && ($file =~ /\.(obj|o|lib|a|dll|so|exe|exp|qm|pdb|idb|suo)$/i || isExe($maybe_bin))) {
+                    complain("Adding build artifact", "generated");
+                }
+            } else {
+                if (!defined($cfg{giant}) && $size > (2 << 20)) {
+                    complain("Changing huge binary file (".formatSize($size)." > 2MiB)", "giant", 1);
+                }
+            }
+            if ($file =~ /\.png$/i
+                # If identify is available, check for faults:
+                && haveIdentify() && dodgyPng($sha1, $file)
+                # Only complain if the issue is new, of course:
+                && ($new_file || !dodgyPng("${sha1}^", $file))) {
+                complain("Defect in PNG format, see: identify $file", "cruft");
+            }
+            next;
+        }
+        if (/^new(?: file)? mode (\d+)$/) {
+            my $text = $1;
+            if ($text eq "160000" || $text eq "120000") {
+                $is_special = 1;
+                next;
+            }
+            my $perm = oct($text);
+            # Executable or set*id:
+            if ($perm & 07000) {
+                # set*id; git discards it - but asking for it is misguided.
+                complain("Adding file with set*id permissions", "permissions", 1);
+            } elsif ($perm & 0111) {
+                if ($file =~ /\.(py|pl|sh|bash|php|cgi|js)$/
+                    # i.e. known script suffix; or no suffix at all:
+                    || $file !~ m,[^/.]\.[^/.]+$,) {
+                    $need_hash_bang = 1;
+                } elsif ($file !~ /\.(exe|bat|cmd|ps1)$/) {
+                    # Should not be executable.
+                    complain("Adding implausibly executable file", "permissions");
+                }
+            }
+        }
+        if (!$is_special && /^index ([\w,]+)\.\.(\w+)(?! 160000)( |$)/) {
+            my ($old_trees, $new_tree) = ($1, $2);
+            #print "*** got index $old_trees $new_tree.\n";
+            $size = `git cat-file -s $new_tree`;
+            my $issrc = $clike || ($file =~ /\.(s|asm|pas|l|m4|bat|cmd|sh|py|php|qdoc(conf)?|json)$/i);
+            if ($old_trees =~ /^0{40}(,0{40})*$/) {
+            #print "*** adding ".$file.".\n";
+                if (!$conflict_fail && $file =~ /\.(BACKUP|BASE|LOCAL|REMOTE)\.[^\/]+$/) {
+                    complain("Adding temporary file from merge conflict resolution", "conflict", 1);
+                    $conflict_fail = 1;
+                }
+                if (!defined($cfg{alien}) && $file =~ /\.(sln|vcproj|vcxproj|user)$/i) {
+                    complain("Warning: Adding alien build system file", "alien");
+                }
+                if ($size > (2 << 20)) {
+                    if (!defined($cfg{giant})) {
+                        complain("Adding huge file (".formatSize($size)." > 2MiB)", "giant", 1);
+                    }
+                } elsif ($size >= 51200 && !$issrc && !defined($cfg{size})) {
+                    complain("Warning: Adding big file (".formatSize($size)." >= 50KiB)", "size");
+                }
+                $size = 0;
+                $new_file = 1;
+                $no_copyright = $issrc && $file !~ /\.(qdocconf|json)$/i && $file !~ /(^|\/)3rdparty\//;
+            } elsif ($size > 20000 && !$issrc && !defined($cfg{size})) {
+                my $old_size = 0;
+                for my $old_tree (split(/,/, $old_trees)) {
+                    my $osz = `git cat-file -s $old_tree`;
+                    $old_size = $osz if ($osz > $old_size);
+                }
+                if ($size > $old_size * 3 / 2) {
+                    complain("Warning: Increasing file size by more than 50% (".
+                                formatSize($old_size)." => ".formatSize($size).")", "size");
+                }
+            }
+            $maybe_bin = $new_tree;
+            next;
+        }
+    }
+}
+close DIFF;
+printerr;
+flushFile();
+if ($mixws_check) {
+    flushChunk() if ($chunk);
+    if ($nonws and $ws) {
+        my @extras;
+        for (sort keys %ws_lines) {
+            $file = $_;
+            if ($gerrit_rest) {
+                do_complain($_, "WS-only change", "mixws", -1) foreach (@{$ws_lines{$file}});
+            } else {
+                push @extras, "WS-only in ".$file.": ".join(", ", @{$ws_lines{$file}});
+            }
+        }
+        $file = "~~~~~";
+        do_complain(1e9, "Mixing whitespace-only changes with other changes", "mixws", -1, @extras);
+    }
+}
+
+if ($gerrit_rest) {
+    my %gerrit_review;
+    my @cover_texts;
+    foreach my $fn (sort keys %complaints) {
+        my $file;
+        if (length($fn) && ($fn ne "~~~~~")) {
+            $file = ($fn eq "!!!!!") ? "/COMMIT_MSG" : $fn;
+            my @comments = ();
+            foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
+                my @texts;
+                push @texts, @$_ foreach (@{$complaints{$fn}{$ln}});
+                my %comment;
+                $comment{line} = int($ln) if ($ln && $ln < 1e9);
+                $comment{message} = join "\n\n", @texts;
+                push @comments, \%comment;
+            }
+            $gerrit_review{comments}{$file} = \@comments;
+        } else {
+            foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
+                push @cover_texts, @$_ foreach (@{$complaints{$fn}{$ln}});
+            }
+        }
+    }
+    if (%complaints) {
+        push @cover_texts, $_ for (sort keys %footnotes);
+        push @cover_texts, "See http://wiki.qt.io/Early_Warning_System for explanations.";
+        $gerrit_review{message} = join "\n\n", @cover_texts;
+    }
+    $gerrit_review{labels}{'Sanity-Review'} = (!$fail ? 1 : -$fail);
+    require JSON;
+    print JSON::encode_json(\%gerrit_review)."\n";
+    exit(0);
+}
+
+if (%complaints) {
+    $summary =~ s/^(.{50}).{5,}$/$1\[...]/;
+    print "***\n*** Suspicious changes in commit ".$sha1." (".$summary."):\n";
+    my ($lpfx, $elpfx) = ("***   ", "***\n");
+    foreach my $fn (sort keys %complaints) {
+        my $fpfx;
+        if (length($fn) && ($fn ne "~~~~~")) {
+            $file = ($fn eq "!!!!!") ? "commit message" : $fn;
+            print $elpfx.$lpfx.$file.":\n";
+            $fpfx = $lpfx."  - ";
+        } else {
+            print $elpfx;
+            $fpfx = $lpfx."- ";
+        }
+        foreach my $ln (sort { $a <=> $b } keys %{$complaints{$fn}}) {
+            my $pfx = $fpfx;
+            $pfx .= "$ln: " if ($ln > 0 && $ln < 1e9);
+            foreach my $ent (@{$complaints{$fn}{$ln}}) {
+                my @ry = @$ent;
+                print $pfx.(shift @ry)."\n";
+                print $lpfx."  $_\n" for (@ry);
+            }
+        }
+    }
+    if (%footnotes) {
+        print $elpfx;
+        print $lpfx.$_."\n" for (sort keys %footnotes);
+    }
+    print $elpfx.$lpfx."See http://wiki.qt.io/Early_Warning_System for explanations.\n";
+}
+exit($fail);

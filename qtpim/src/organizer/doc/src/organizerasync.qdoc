@@ -1,0 +1,130 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+
+/*!
+
+\page organizerasync.html
+
+\title Qt Organizer Asynchronous API
+
+\tableofcontents
+
+
+The Qt Organizer Asynchronous API enables a client to asynchronously fetch,
+update, or remove calendar, scheduling and personal data from an organizer
+item manager.  Use of the asynchronous API offers the programmer greater
+flexibility when requesting information from remote or slow local datastores.
+
+The asynchronous API is available through classes derived from the
+QOrganizerAbstractRequest class that enable clients to:
+\list
+  \li Manipulate organizer items
+  \li Manipulate item collections
+\endlist
+
+\section1 Manipulating Organizer Items
+
+The most common type of operation that clients will perform involves retrieval
+or modification of organizer items.  For in-depth information about item
+manipulation, see \l{Qt Organizer C++ API}.
+
+The asynchronous API supports the following operations:
+\list
+  \li Fetch item ids
+  \li Fetch persistent items (for export)
+  \li Fetch items (including generated occurrences) in a time period
+  \li Fetch the occurrences of a specific item
+  \li Save items (create or update)
+  \li Remove items
+\endlist
+
+These operations are supported via the following classes:
+\list
+\li QOrganizerItemIdFetchRequest
+\li QOrganizerItemFetchForExportRequest
+\li QOrganizerItemFetchRequest
+\li QOrganizerItemOccurrenceFetchRequest
+\li QOrganizerItemSaveRequest
+\li QOrganizerItemRemoveRequest
+\endlist
+
+\section1 Manipulating Item Collections
+
+Each item is saved in a collection in a manager.  Each collection has various
+properties which, if the manager supports such operations, may be modified
+by clients.  For in-depth information about collections, see
+\l{Qt Organizer C++ API}.
+
+
+The asynchronous API supports the following operations:
+\list
+  \li Fetch collections (that is, the object which defines the properties of a collection)
+  \li Save collections (create or update)
+  \li Remove collections
+\endlist
+
+These operations are supported via the following classes:
+\list
+\li QOrganizerCollectionFetchRequest
+\li QOrganizerCollectionSaveRequest
+\li QOrganizerCollectionRemoveRequest
+\endlist
+
+
+\section1 Performing Asynchronous Operations
+
+All asynchronous operations are performed in a similar way:
+    \list
+        \li A request of the desired type (which is derived from
+            QOrganizerAbstractRequest) is created
+        \li Certain criteria are set which determine the intent of the request
+        \li QOrganizerAbstractRequest::stateChanged() signal of the request is
+            connected to a slot which deals with the results.
+        \li The request is started.
+    \endlist
+
+\note To receive the results of the request as they become available, rather
+than only the final set of results once the
+request changes state (to \c FinishedState, for example), the client should
+instead connect the QOrganizerAbstractRequest::resultsAvailable() signal to the
+slot which deals with the results.
+
+\section2 Reporting Errors
+
+When a asynchronous operation fails, clients need to be able to retrieve error
+information associated with that asynchronous operation.  It is possible to
+retrieve this error information by calling the
+QOrganizerAbstractRequest::error() function on the corresponding request.
+
+For some asynchronous operations (for example, batch save or remove operations)
+it is possible that multiple errors may occur during the operation.  In those
+cases, clients can call the errorMap() function on the request object to
+retrieve a map of input index to error.  See, for instance,
+QOrganizerItemSaveRequest::errorMap().
+
+*/

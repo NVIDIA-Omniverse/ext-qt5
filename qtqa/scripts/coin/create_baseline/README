@@ -1,0 +1,61 @@
+# Coin Baseline Test -scripts #
+
+This folder contains convenience scripts to create and test production
+baselines of tqtc-coin-ci repository.
+
+Q: How is new production baseline created?
+A: Repository qtqa/tqtc-coin-ci production branch is reset to its current
+   tip commit followed by merge origin/master -> production.
+
+Q: How is the new production baseline tested?
+A: Custom integration are scheduled with run_builds.py command line
+   interface.
+
+Q: How is the new production baseline verified?
+A: If the integration tests are successful, we can assume that the
+   production is safe to be updated.
+
+Q: How is the new production baseline applied to Coin production?
+A: The instructions for updating production can be found from the Coin
+   webserver Documentation-page.
+
+## Create Production Baseline ##
+
+The script "create_baseline.sh" will merge origin/master to production
+and the script "test_baseline.sh" will execute the integrations tests
+on the Coin webserver.
+
+Step summary:
+ 1. Create New Production Baseline
+ 2. Test New Production Baseline
+ 3. Update the baseline commit in Gerrit with test results
+ 4. Approve the commit in Gerrit
+ 5. Update Coin Production
+
+# Create New Production Baseline
+
+Option 1) Merge origin/master to production:
+   ./create_baseline
+
+Option 2) Merge {master-commit} to production:
+   ./create_baseline {master-commit}
+
+# Test New Production Baseline #
+
+After the baseline has been created, you may continue with testing
+   ./test_baseline
+
+NOTE: If any test is skipped, failed or there is odd behavior, this
+should be mentioned as a comment on the change.
+
+# Update Coin Production (requirements)
+
+The production merge commit is pushed automatically in the repository under
+the author specified in git configuration. The commit needs to be approved
+by review in Gerrit. After the commit is approved and merged in the production
+branch, the Coin production can be updated with 'git pull --rebase'.
+
+## TODO ##
+- Make baseline scripts non-interactive
+- Auto schedule (nightly)
+- Add usage help for arguments

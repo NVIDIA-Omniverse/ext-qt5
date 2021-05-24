@@ -1,0 +1,72 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd and/or its subsidiary(-ies).
+** Contact: http://www.qt-project.org/legal
+**
+** This file is part of the documentation of the Qt Toolkit.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \namespace QService
+    \ingroup servicefw
+    \inmodule QtServiceFramework
+
+    \brief The QService namespace contains miscellaneous identifiers used throughout the
+    Qt Service framework library.
+*/
+
+/*!
+    \enum QService::Scope
+    Defines the scope to be used when accessing services.
+
+    \value UserScope When adding and removing services, uses a storage location
+    specific to the current user.
+    When searching for services and interface implementations, first searches in the
+    user-specific location; if the service or interface implementation
+    is not found, searches in the system-wide storage location (if the user has
+    sufficient permissions to do so).
+
+    \value SystemScope When adding and removing services, use a system-wide
+    storage location accessible to all users. When searching
+    for services and interface implementations, search only in the system-wide
+    storage location.
+*/
+
+/*!
+    \enum QService::UnrecoverableIPCError
+    Defines the unrecoverable IPC error of the service
+
+    \value    ErrorUnknown                  An unknown IPC error.
+    \value    ErrorServiceNoLongerAvailable Indicates that the service is no longer available.
+    \value    ErrorOutofMemory              Indicates that the service is out of memoruy.
+    \value    ErrorPermissionDenied         Indicates that the permission of this service is denied.
+    \value    ErrorInvalidArguments         User uses invalid argument for this service.
+*/
+
+/*!
+    \enum QService::Type
+    Defines the type of the service
+
+    \value    Plugin          This denotes that the service is plug-in based.
+    \value    InterProcess    This denotes that the service is deployed using IPC mechanisms
+                              available on the current platform, such as DBus or local sockets.
+*/

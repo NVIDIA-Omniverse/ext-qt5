@@ -1,0 +1,118 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+
+
+/*!
+
+\page organizersync.html
+
+\title Qt Organizer Synchronous API
+
+\tableofcontents
+
+The Qt Organizer Synchronous API provides the simplest way to access or modify
+the organizer item information managed by a particular backend. It has the
+disadvantage that calls block the current thread of execution until completion
+and is therefore most suitable only for applications which interact with
+local, high-speed datastores, or for applications which do not require a
+responsive user interface.
+
+Most operations which may be performed using the synchronous API may also be
+performed using the asynchronous API.  It is recommended for most
+applications that the asynchronous API be used where possible.
+
+
+The synchronous API offered by the Organizer Items module is available through the QOrganizerManager
+class. It has the following main use cases:
+\list
+  \li Manipulating Organizer Items
+  \li Manipulating Item Collections
+\endlist
+
+
+
+\section1 Manipulating Organizer Items
+
+The most common type of operation that clients perform involves retrieval
+or modification of organizer items.  For in-depth information about item
+manipulation, see \l{Qt Organizer C++ API}.
+
+The QOrganizerManager class provides API for accessing the IDs of items which are stored in the manager:
+\list
+  \li QOrganizerManager::itemIds()
+\endlist
+
+The synchronous, singular item manipulation functions offered by the QOrganizerManager class are:
+\list
+  \li QOrganizerManager::item()
+  \li QOrganizerManager::saveItem()
+  \li QOrganizerManager::removeItem()
+\endlist
+
+The synchronous, batch item manipulation functions offered by the QOrganizerManager class are:
+\list
+  \li QOrganizerManager::items() which returns persistent and generated items within a given time period
+  \li QOrganizerManager::itemsForExport() which returns only persistent items
+  \li QOrganizerManager::itemOccurrences() which returns the occurrences of a specific recurring item
+  \li QOrganizerManager::saveItems() which may be used to update a recurring item, or save an exceptional occurrence
+  \li QOrganizerManager::removeItems() which may be used to remove a recurring item or exceptional occurrence
+\endlist
+
+
+\section1 Manipulating Item Collections
+
+Every item is saved in a collection in a manager.  Each collection has various
+properties which, if the manager supports such operations, may be modified
+by clients.  For in-depth information about collections, see
+\l{Qt Organizer C++ API}.
+
+The synchronous API offers the following functions to manipulate collections:
+\list
+  \li QOrganizerManager::defaultCollectionId() returns the id of a default collection of the manager
+  \li QOrganizerManager::collection() returns an existing collection by its id
+  \li QOrganizerManager::collections() returns all collections in the manager
+  \li QOrganizerManager::saveCollection() updates an existing collection or adds a new collection
+  \li QOrganizerManager::removeCollection() removes an existing collection (and deletes any items it contains)
+\endlist
+
+It also offers a convenience function which returns a collection with a given collection id.
+
+\section1 Reporting Errors
+
+When a synchronous operation fails, clients need to be able to retrieve error
+information associated with that synchronous operation.  You can call the
+QOrganizerManager::error() function directly after a failing synchronous
+operation to determine why it failed.
+
+For some synchronous operations (for example, batch save or remove operations) it is possible that
+multiple errors may occur during the operation.  In those cases, clients can call QOrganizerManager::errorMap()
+to retrieve a map of input index to error, which will be filled by the function as required.
+The QOrganizerManager::error() function will report the overall operation error.
+
+*/
+

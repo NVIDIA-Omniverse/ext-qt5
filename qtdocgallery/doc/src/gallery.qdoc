@@ -1,0 +1,127 @@
+/****************************************************************************
+**
+** Copyright (C) 2012 Digia Plc and/or its subsidiary(-ies).
+** Contact: http://www.qt-project.org/legal
+**
+** This file is part of the documentation of the Qt Toolkit.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and Digia.  For licensing terms and
+** conditions see http://qt.digia.com/licensing.  For further information
+** use the contact form at http://qt.digia.com/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file.  Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \group gallery
+    \title DocGallery Classes
+
+    A set of APIs to navigate and query documents using their meta-data.
+*/
+
+/*!
+    \page gallery.html
+    \title Qt DocGallery
+    \ingroup technology-apis
+    \brief An API to navigate and query documents using their meta-data.
+
+    The Qt DocGallery provides APIs to navigate and query documents using their
+    meta-data.
+
+    \tableofcontents
+
+    \section1 Overview
+
+    The Qt DocGallery provides an API for navigating and querying documents
+    using their meta-data. The common use case would be populating the media
+    selection views of a music player, or image viewer. It also provides APIs
+    for querying and editing the meta-data of individual documents.
+
+    Typically all files in user directories should be available in the
+    document gallery. The principal types are Audio, Video, Image, and
+    Document, but files can also be categorized as a File, Folder, Text,
+    or Playlist. There are also some meta-types composed from the meta-data
+    of files, these are Artist, Album, AudioGenre, and PhotoAlbum.
+
+    The document gallery API is composed of a set of asynchronous request
+    (\l QGalleryAbstractRequest) classes which talk to the system file indexing
+    service, this would be e.g. Tracker on certain Linux distributions, and
+    potentially Windows Search, or Spotlight on macs.
+    There are three requests; \l QGalleryQueryRequest takes a type, a parent
+    item, and some filtering criteria (\l QGalleryFilter) and returns
+    meta-data for all matching items.
+    \l QGalleryItemRequest takes an item ID and returns meta-data for just that
+    item.  And \l QGalleryTypeRequest takes an item type and returns meta-data
+    describing that type.
+
+    The requests operate on implementations of the \l QAbstractGallery.
+    The default implementation is \l QDocumentGallery, but it's possible to
+    create alternative implementations which talk to a media server or web
+    services.
+
+    The primary interface to the results of a request is the
+    \l QGalleryResultSet class which provides accessors for reading and writing
+    the meta-data of a set of items.
+
+    A \l QGalleryResultSet cannot be created directly and may not need to be
+    accessed directly, instead an instance must be requested from a gallery
+    using one of the gallery request classes which typically also provide
+    convenience functions for accessing the items in a result set.
+
+
+    \section2 Requests
+
+    The gallery request classes inherit from \l QGalleryAbstractRequest and
+    are used to fetch items from a gallery, or to initiate service provided
+    by a gallery.
+
+    \annotatedlist gallery-requests
+
+
+    \section2 Filters
+
+    The filter classes provide a way to describe meta-data criteria items must
+    satisfy to be included in the results of some requests.
+
+    \annotatedlist gallery-filters
+
+
+    \section2 Galleries
+
+    The gallery classes provide instances of different gallery types.  Currently
+    the only gallery type is the Document Gallery.
+
+    \annotatedlist gallery-galleries
+
+
+    \section2 QGalleryQueryModel
+
+    The \l QGalleryQueryModel class implements a QAbstractItemModel using
+    QGalleryQueryRequest.  This is a convenience class which simplifies the
+    process of presenting gallery items in a list view.
+
+
+    \section2 \l QML Elements
+
+    QML elements providing access to the document gallery are implemented in
+    the \l {Gallery QML Plugin}.
+
+    \annotatedlist qml-gallery
+
+    \section1 Examples
+
+    \annotatedlist gallery-examples
+*/

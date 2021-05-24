@@ -1,0 +1,326 @@
+#! /usr/bin/perl
+
+# Copyright (C) 2015 The Qt Company Ltd.
+# Contact: http://www.qt.io/licensing/
+#
+# You may use this file under the terms of the 3-clause BSD license.
+# See the file LICENSE from this package for details.
+#
+
+use strict;
+use warnings;
+use POSIX;
+use JSON;
+use File::Path;
+use Gerrit::REST;
+
+# Usage: $0 [instance]
+# - default instance is 'sanitybot'
+# - configure ssh: Host, Port, User, IdentityFile
+# - configure git: git config --global <instance>}.<option> <value>
+# Valid options are:
+#   gerrithost (mandatory)
+#     Target host. The identification is done via SSH.
+#   gerritactorhost
+#     Target host for inviting reviewers. Falls back go gerrithost.
+#   resthost (mandatory)
+#     The REST base URL of the target host.
+#   restuser
+#     The user name for resthost. If omitted, credentials are expected in .netrc.
+#   restpass
+#     The password for resthost. If omitted, credentials are expected in .netrc.
+#   useremail (mandatory)
+#     Bot's email address. Used to identify invitations and own actions.
+#   inviteonly (default 0)
+#     If this flag is set, the bot will only become active if it is a
+#     requested reviewer. DON'T USE (see TODO).
+#   gitbasedir (mandatory)
+#     Base dir for local GIT clones of the projects.
+#   gitdofetch
+#     Need to fetch the repos or are they local?
+#   workers
+#     A space-separated list of workers.
+#     They are run in a local bare clone of the inspected repository.
+#     There must be a workers.<worker> config entry for each worker
+#     (note that these entries are NOT namespaced with the instance).
+#     The magic string @SHA1@ is replaced by the commit to be checked;
+#     @PROJ@ by the gerrit project the worker is run for.
+#     @BRANCH@ is the branch the change was submitted to.
+#     It is expected to dump a Gerrit ReviewInput JSON entity to stdout.
+#     The output from all workers is merged.
+#   excluded (optional)
+#     Space-separated list of exclusions of the form <project>[:<branch>].
+#     To globally exclude a branch, use *:<branch>.
+#   maintainers (optional)
+#     Space-separated list of reviewers to add on "special occasions".
+#   verbose (default 0)
+#     Print progress/result messages.
+
+# TODO
+# - Implement some retry mechanism to deal with network failures
+# - Make inviteonly actually work beyond the initial startup.
+#   See http://code.google.com/p/gerrit/issues/detail?id=1200
+
+my $instance = 'sanitybot';
+$instance = $ARGV[0] if ($#ARGV > -1);
+
+# Doing this is less expensive than calling git repeatedly.
+my %config = ();
+for (`git config -l`) {
+  /^([^=]+)=(.*$)/;
+  $config{$1} = $2;
+}
+
+sub getcfg($;$)
+{
+  my ($key, $def) = @_;
+  my $fkey = $instance.'.'.$key;
+  if (defined $config{$fkey}) {
+    return $config{$fkey};
+  } elsif (@_ > 1) {
+    return $def;
+  } else {
+    die $fkey." not set.\n";
+  }
+}
+
+my $GERRIT_HOST = getcfg 'gerrithost';
+my $GERRIT_ACTOR_HOST = getcfg 'gerritactorhost', $GERRIT_HOST;
+my $USER_EMAIL = getcfg 'useremail';
+my $INVITE_ONLY = getcfg 'inviteonly', 0;
+my $REST_HOST = getcfg 'resthost';
+my $REST_USER = getcfg 'restuser', undef;
+my $REST_PASS = getcfg 'restpass', undef;
+my $GIT_BASEDIR = getcfg 'gitbasedir';
+my $GIT_DO_FETCH = getcfg 'gitdofetch';
+my $WORKERS = getcfg 'workers';
+my %EXCLUDED_PROJECTS = map { $_ => 1 } split(/\s+/, getcfg('excluded', ""));
+my @MAINTAINERS = split(/\s+/, getcfg('maintainers', ""));
+my $verbose = getcfg 'verbose', 0;
+
+my @gerrit = ("ssh", $GERRIT_HOST, "gerrit");
+my @gerrit_actor = ("ssh", $GERRIT_ACTOR_HOST, "gerrit");
+my $gerrit_rest = Gerrit::REST->new($REST_HOST, $REST_USER, $REST_PASS);
+
+my %processed = ();
+my %skipfetch = ();
+
+sub printerr($)
+{
+  my ($msg) = @_;
+  die $msg.": execution failed: ".$!."\n" if ($? < 0);
+  die $msg.": command crashed with signal ".$?."\n" if ($? & 127);
+  print STDERR $msg.".\n";
+}
+
+sub merge_hashes($$);
+
+sub merge_hashes($$)
+{
+  my ($base, $ext) = @_;
+
+  for my $k (keys %$ext) {
+    my $br = \$$base{$k};
+    my $ev = $$ext{$k};
+    if (!defined($$br)) {
+      $$br = $ev;
+    } else {
+      my $bt = ref($$br);
+      my $et = ref($ev);
+      die "Values for '$k' have different types ($bt, $et).\n" if ($bt ne $et);
+      if ($et eq "HASH") {
+        merge_hashes($$br, $ev);
+      } elsif ($et eq "ARRAY") {
+        push @$$br, @$ev;
+      } elsif ($et eq "") {
+        $$br = $$br."\n\n".$ev;
+      } else {
+        die "Values for '$k' have unsupported type $bt.\n";
+      }
+    }
+  }
+}
+
+sub process_commit($$$$$)
+{
+  my ($number, $project, $branch, $ref, $rev) = @_;
+
+  if (defined $processed{$ref}) {
+    return;
+  }
+  $processed{$ref} = 1;
+  my $orig_project = $project;
+  $project =~ s,/$,,; # XXX Workaround QTQAINFRA-381
+  my $verdict = {};
+  my @invite;
+  if (defined($EXCLUDED_PROJECTS{$project})
+      || defined($EXCLUDED_PROJECTS{"*:".$branch})
+      || defined($EXCLUDED_PROJECTS{$project.":".$branch})) {
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== excluding commit ".$ref." in ".$project." on branch ".$branch."\n";
+    $$verdict{message} = "(skipped)";
+    $$verdict{labels}{'Sanity-Review'} = 1;
+  } else {
+    $verbose and print "===== ".strftime("%c", localtime(time()))." ===== processing commit ".$ref." in ".$project."\n";
+    my $GIT_DIR = $GIT_BASEDIR."/".$project.".git";
+    if (!-d $GIT_DIR) {
+      mkpath $GIT_DIR or die "cannot create ".$GIT_DIR.": ".$!;
+    }
+    chdir $GIT_DIR or die "cannot change to ".$GIT_DIR.": ".$!;
+    if ($GIT_DO_FETCH) {
+      if (!-d $GIT_DIR."/refs/remotes" and `git config remote.origin.url` eq "") {
+        if (!-d $GIT_DIR."/refs") {
+          if (system("git", "init", "--bare")) {
+            printerr "Init of ".$project." failed";
+            return;
+          }
+        }
+        if (system("git", "remote", "add", "origin", 'ssh://'.$GERRIT_HOST.'/'.$project)) {
+          printerr "Adding remote for ".$project." failed";
+          return;
+        }
+      }
+      my @mainlines;
+      if (!defined $skipfetch{$project}) {
+        # Update refs, otherwise the selective fetches start from scratch each time.
+        chomp(@mainlines = `git config remote.origin.fetch`);
+        $skipfetch{$project} = 1;
+      }
+      if (system("git", "fetch", "-f", "--prune", "origin", $ref.":refs/changes/".$number, @mainlines)) {
+        printerr "GIT fetch of ".$ref." from ".$project." failed";
+        return;
+      }
+      $verbose and print "===== ".strftime("%c", localtime(time()))." ===== fetched change\n";
+    }
+
+    for my $w (split(/ /, $WORKERS)) {
+      my $worker = $config{'workers.'.$w};
+      die "workers.$worker not set.\n" if (!defined($worker));
+      $worker =~ s/\@PROJ\@/$project/g;
+      $worker =~ s/\@SHA1\@/$rev/g;
+      $worker =~ s/\@BRANCH\@/$branch/g;
+      my $output;
+      open VERDICT, $worker." 2>&1 |" or die "cannot run worker '$w': ".$!;
+      {
+        local $/;
+        $output = <VERDICT>;
+      }
+      close VERDICT;
+      while ($output =~ s/^([^\{][^\n]*\n)//s) {
+        print STDERR "Non-JSON output from worker '$w': $1\n";
+      }
+      die "Worker '$w' for commit ".$ref." in ".$project." crashed with signal ".$?.".\n" if ($? & 127);
+      die "Worker '$w' returned non-zero exit code for commit ".$ref." in ".$project.".\n" if ($?);
+      my $vd = {};
+      if (length($output) > 50000) {
+        $$vd{message} = "**** Worker '$w' produced an unreasonable amount of output. You should ask the bot maintainers for advice.";
+        push @invite, @MAINTAINERS;
+      } else {
+        $vd = decode_json($output);
+        defined($vd) or die "cannot decode verdict from worker '$w' as JSON\n";
+        if (defined($$vd{invite})) {
+          push @invite, @{$$vd{invite}};
+          delete $$vd{invite};
+        }
+      }
+      merge_hashes($verdict, $vd);
+    }
+  }
+  $$verdict{tag} = 'autogenerated:sanity';
+  my $hasComments = defined $$verdict{comments} && %{$$verdict{comments}};
+  if (defined $$verdict{labels}{'Sanity-Review'}
+      && $$verdict{labels}{'Sanity-Review'} == 1 && !$hasComments) {
+      # Don't spam everyone about a boring +1 sanity review with no comments.
+      $$verdict{notify} = "NONE";
+  }
+  if (@invite) {
+    if (system(@gerrit_actor, "set-reviewers", (map { ('-a', $_) } @invite), '-p', $project, '--', $rev)) {
+      print "===== ".strftime("%c", localtime(time()))." ===== invitation FAILED\n";
+      printerr("Inviting reviewers to ".$rev." (".$project."/".$ref.") failed");
+    } else {
+      $verbose and print "Invited @invite to ".$rev." (".$project."/".$ref.")\n";
+    }
+  }
+  eval {
+    $gerrit_rest->POST("/changes/$number/revisions/$rev/review", $verdict);
+  };
+  if ($@) {
+    print "===== ".strftime("%c", localtime(time()))." ===== verdict NOT submitted\n";
+    print STDERR "Submission of REST verdict for ".$rev." (".$project."/".$ref.") failed: $@\n";
+    return;
+  }
+  $verbose and print "Submitted verdict for ".$rev." (".$project."/".$ref.")\n";
+}
+
+sub do_move($$$)
+{
+  return "Please use the menu in the top right corner 'Move change' instead of this bot.";
+}
+
+sub process_move($$$) {
+  my ($chg, $author, $target) = @_;
+  my $number = $$chg{'number'};
+  $gerrit_rest->POST("/changes/$number/revisions/current/review",
+                     { message => do_move($chg, $author, $target) });
+}
+
+$| = 1; # make STDOUT autoflush
+
+open UPDATES, "-|", @gerrit, "stream-events" or die "cannot run ssh: ".$!;
+
+# Try to ensure that the event streaming has started before we make the snapshot, to avoid a race.
+# Of course, the first connect may be still delayed ...
+sleep(1);
+
+my @query = ("status:open");
+push @query, "reviewer:".$USER_EMAIL if ($INVITE_ONLY);
+open STATUS, "-|", @gerrit, "query", "--format", "JSON", "--current-patch-set", @query or die "cannot run ssh: ".$!;
+REVIEW: while (<STATUS>) {
+  my $review = decode_json($_);
+  defined($review) or die "cannot decode JSON string '".chomp($_)."'\n";
+  my $number = $$review{'number'};
+  my $project = $$review{'project'};
+  my $branch = $$review{'branch'};
+  my $cps = $$review{'currentPatchSet'};
+  if (defined $cps) {
+    my $status = $$review{'status'};
+    if ($status ne 'NEW' and $status ne 'DRAFT') {
+       next REVIEW;
+    }
+    my $ref = $$cps{'ref'};
+    my $revision = $$cps{'revision'};
+    my $approvals = $$cps{'approvals'};
+    if (defined $approvals) {
+      foreach my $appr (@$approvals) {
+        my $by = $$appr{'by'};
+        defined $$by{'email'} or next;   # The reviewer may be gone and thus have no valid mail any more.
+        if ($$by{'email'} eq $USER_EMAIL) {
+          next REVIEW;
+        }
+      }
+    }
+    process_commit($number, $project, $branch, $ref, $revision);
+  }
+}
+close STATUS;
+
+while (<UPDATES>) {
+  my $update = decode_json($_);
+  defined($update) or die "cannot decode JSON string '".chomp($_)."'\n";
+  my $type = $$update{'type'};
+  if (defined($type)) {
+    if ($type eq 'patchset-created') {
+      my $chg = $$update{'change'};
+      my $ps = $$update{'patchSet'};
+      process_commit($$chg{'number'}, $$chg{'project'}, $$chg{'branch'}, $$ps{'ref'}, $$ps{'revision'});
+    } elsif ($type eq 'ref-updated') {
+      my $rup = $$update{'refUpdate'};
+      delete $skipfetch{$$rup{'project'}};
+    } elsif ($type eq 'comment-added') {
+      my $cmd = $$update{'comment'};
+      if ($cmd =~ /^(?:gerrit-)?bot:\h*(?:please\h+)?move\h+(?:back\h+)?to\h+(?:branch\h+)?([\w.\/-]*\w)\b/im) {
+        process_move($$update{'change'}, $$update{'author'}, $1);
+      }
+    }
+  }
+}
+close UPDATES;

@@ -1,0 +1,4 @@
+[ '--summarize', "$DATADIR/raw-logs/qtbase-parallel-test-wrong-order.txt" ]
+Autotest `tst_qchar' failed :(
+
+

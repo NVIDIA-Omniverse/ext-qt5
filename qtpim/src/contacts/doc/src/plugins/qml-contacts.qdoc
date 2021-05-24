@@ -1,0 +1,210 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \page qml-contacts.html
+    \title Qt Contacts QML API
+    \brief A QML plugin for the Qt Contacts API
+
+    \section1 Overview
+
+    To be able to use this component the QML \e {import} statement needs to
+    reference the module before it can used. Simply add the following to the QML
+    file:
+
+     \snippet moduleimports.qml Contacts import
+
+    The Contacts API enables client to search for contacts data from local
+    backends and use filters to get only the relevant results. The QML Contacts
+    API delivers this capability in easy to use form.
+
+    The following describes the API. The \l{Examples} section contains sample
+    code for the QML API.
+
+    \section2 Contact Model
+
+    The Contact itself is represented by a model called a \l {ContactModel}.
+    This model supplies a rich selection of properties to display or to use as
+    filter criteria. The model is then used to perform requests on a contacts
+    store.
+
+    \section2 Filters
+
+    Developers can construct a series of filters and combine them using the
+    \l{IntersectionFilter} and \l{UnionFilter} types to represent a logical \e
+    and and \e or of the results. There are also other properties that give
+    control over the filter logic, such as \l {DetailRangeFilter::rangeFlags}
+    {RangeFlags} and the \l {DetailFilter::matchFlags}{MatchFlags}.
+
+    As an example, consider the follow QML code which has a \l ContactModel type
+    containing a filter and a list of sort orders. The contacts will be
+    restricted to those living in Finland who are either male or born between
+    1970 and 1984.
+
+    The list of contacts in this ContactModel will be first sorted on the
+    contacts' organization name and then on the contacts' first name.
+
+    \code
+        import QtContacts 5.0
+
+        ...
+
+        model: ContactModel {
+
+            filter: IntersectionFilter {
+                DetailFilter {
+                    detail:ContactDetail.Address
+                    field: Address.Country
+                    value: "Finland"
+                }
+                UnionFilter {
+                    DetailRangeFilter {
+                        detail:ContactDetail.Birthday
+                        field:Birthday.Birthday
+                        min: '1970-01-01'
+                        max: '1984-12-31'
+                    }
+                    DetailFilter {
+                        detail:ContactDetail.Gender
+                        field:Gender.Gender
+                        value:Gender.Male
+                    }
+                }
+            }
+            sortOrders: [
+               SortOrder {
+                  detail:ContactDetail.Organization
+                  field:Organization.Name
+                  direction:Qt.AscendingOrder
+               },
+               SortOrder {
+                  detail:ContactDetail.Name
+                  field:Name.FirstName
+                  direction:Qt.AscendingOrder
+               }
+            ]
+        }
+    \endcode
+
+    \section2 Contact type
+
+    The \l {Contact} type represents a single contact instance from the contacts store.
+    All contact details are organized as group properties.
+
+    The following snippet shows how you can construct a Contact object in QML:
+    \code
+
+    Rectangle {
+        id: topItem
+        width: 360
+        height: 640
+        x: 0
+        y: 0
+
+        Contact {
+            id: myContact
+            Name {
+                firstName:"John"
+                lastName:"Gates"
+            }
+
+            EmailAddress {
+                emailAddress:"john@example.com"
+            }
+            EmailAddress {
+                emailAddress:"mygmailaccount@gmail.com"
+            }
+
+            address.street:"53 Mysteet St"
+            address.locality: "My City"
+            address.region: "My Region"
+            address.postcode:"1111"
+            address.country:"My Country"
+            address.subTypes:[Address.Postal, Address.Domestic]
+            address.postOfficeBox:"1111"
+
+            Nickname {
+                nickname:"John"
+            }
+
+            PhoneNumber {
+                number: "1111111111"
+                subTypes:[PhoneNumber.Mobile]
+            }
+
+            PhoneNumber {
+                number: "2222222222"
+                subTypes:[PhoneNumber.Fax]
+            }
+
+            PhoneNumber {
+                number: "3333333333"
+                subTypes:[PhoneNumber.Landline]
+            }
+        }
+
+        Column {
+            spacing:4
+
+            //access the same property with different syntaxes
+            Text { text:"Name(from property name):" + myContact.name.firstName + " " + myContact.name.lastName }
+            Text { text:"Name(from detail type):" + myContact.detail(ContactDetail.Name).firstName + " " + myContact.name.lastName }
+
+            Text { text:"Address:" + myContact.address.street + " " + myContact.address.locality + " " + myContact.address.region + " " + myContact.address.postcode }
+
+            //If a contact contains multiple details for the same detail type, you can access them with the property in plural
+            Text { text:"How many email accounts?:" + myContact.emails.length }
+            Text { text:"Email[0]:" + myContact.emails[0].emailAddress }
+
+            Text { text:"How many phone numbers?:" + myContact.phoneNumbers.length }
+            Text { text:"phone number[0]:" + myContact.phoneNumbers[0].number }
+            Text { text:"phone number[1]:" + myContact.phoneNumbers[1].number }
+            Text { text:"phone number[2]:" + myContact.phoneNumbers[2].number }
+        }
+    }
+
+    \endcode
+
+    \section1 Reference documentation
+
+    \section2 Main Classes
+    \annotatedlist qml-contacts-main
+
+    \section2 Detail Leaf Classes
+    \annotatedlist qml-contacts-details
+
+    \section2 Item matching and filtering
+    \annotatedlist qml-contacts-filters
+
+    \section2 Examples
+
+    The following sample applications show examples of API usage:
+    \list
+        \li \l{qmlcontactslistview}{Qt Quick Contacts List view}
+    \endlist
+
+*/

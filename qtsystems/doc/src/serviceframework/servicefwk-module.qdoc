@@ -1,0 +1,65 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd and/or its subsidiary(-ies).
+** Contact: http://www.qt-project.org/legal
+**
+** This file is part of the documentation of the Qt Toolkit.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+
+
+
+/*!
+    \module QtServiceFramework
+    \title Qt Service Framework Module
+    \ingroup modules
+
+    \brief Service Framework is an Inter-Process Communications (IPC) and
+    Remote Procedure Calling (RPC) machanism designed to operate very
+    efficient, platform independent and be very easy to work with. It
+    operates between Qt applications, and extends the well known Qt Signals
+    and Slots mechanism to operate between different applications.
+
+    To use the module in Qt Quick you will need to load it with the command
+    \qml
+        import QtServiceFramework 5.0
+    \endqml
+
+    For C++, to include the definitions of the module's classes, use the
+    following directive:
+
+    \code
+        #include <QtServiceFramework>
+    \endcode
+
+    And for linking against the module add this to your qmake .pro file
+
+    \code
+        QT += serviceframework
+    \endcode
+
+
+    See more in the \l{Qt Service Framework}{Qt Service Framework Overview}.
+
+*/
+
+

@@ -1,0 +1,111 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \example qmlorganizerlistview
+    \title Qt Quick Organizer List View Example
+
+    \tableofcontents
+
+    \section1 Events List
+
+    This example shows how to write a simple Calendar Event List with the \l {Organizer QML API}{Organizer QML API}
+
+    \section2 Motivation
+    This application was written to provide an example to developers of how to use the Qt Quick Organizer and
+    Qt Versit APIs.
+
+    It provides an example of how to use the Qt Organizer and Versit libraries to:
+    \list
+    \li select a backend for volatile memory or persistent storage
+    \li list the stored Calendar Events
+    \li add Events
+    \li edit Events
+    \li Remove Events
+    \li import Event lists as ICal\reg *
+    \endlist
+
+    [*]\e {iCal iCalendar is a standard \l{http://tools.ietf.org/html/rfc5545}{(RFC 5545)} for calendar data exchange}
+
+    \section2 Use Case
+    Most people have a need to store Calendar reminders for various events ranging from weddings, hairdresser appointments,
+    work meetings to reccuring football training every week.
+    This sample application provides a simple Event List  book that allows users
+    to retrieve their Calendar Events and modify them, delete them or add new events using either volatile memory of the
+    supported backend for the device in use.
+
+    \section2 Interface
+    The application is designed to work on desktop and mobile platforms with
+    minimal differences in code between the platforms.  The interface is
+    organized into a QML List View, showing the Organizer Event List by default.
+    Events can be added or deleted using the buttons at the bottom
+    of the contact list. Selecting an event is simply done by clicking the
+    mouse on the desired event, and using the save button to store it.
+
+    Here we see the \l {OrganizerModel} used with a QML List View to show some Events added by default.
+
+    \image qmlorganizerlistview-main.png
+
+    When editing  you click on the edit button and an Event Editor will be displayed showing
+    the display label along with  the start and end dates of the events.
+
+    \image qmlorganizerlistview-edit.png
+
+    Here start and end dates or label for the event can be modified. Notice that the boundaries have been set so that
+    any character can be used in the label. However the date, month and the year are limited
+    to integers which match those fields to give some kind of simple but sensible user interaction.
+    When finished select either the cancel button or the save button and it returns to the
+    list view showing all events. If cancel button is pressed nothing will change, or if saved the modifications
+    to the event will be updated in this main list view.
+
+    Adding new events from the main list view is equally simple. Click on add new event button and the same editor
+    will be displayed with NEW in the event title as follows.
+
+    \image qmlorganizerlistview-new.png
+
+    Simply Edit this as with any other event, and cancel or save it. Cancelling will mean this new event will be lost,
+    where saving will add the new event to the main list view along with all the other existing events.
+
+    Deleting events from the main list view is simply done by pressing the delete button and the currently highlighted
+    event will be removed from the organizer list view and also the backend where this event is stored.
+
+    \section2 Known Issues
+    The example is not intended to be feature complete.  Only a very limited subset of detail types are
+    supported by the application.  It exercises only a very small portion of the Qt Organizer QML API.
+    It is intended to be very simple to show the API and allow the developers skilled in QML to utilise
+    this interface to its full potential.
+
+    In particular:
+    \list
+        \li The example only exercises the QML OrganizerModel  API to save, edit and delete Events.
+        \li Everything is done with minimal external components or states to keep things simple and focused
+           on how the API works.
+        \li Editing a Date/Time is in string format. In a real application would be a more advanced
+           component on its own which would allow easy and simple user input with good error checking and
+           error messages for the user.
+    \endlist
+*/

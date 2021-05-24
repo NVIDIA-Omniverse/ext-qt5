@@ -1,0 +1,158 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd and/or its subsidiary(-ies).
+** Contact: http://www.qt-project.org/legal
+**
+** This file is part of the documentation of the Qt Toolkit.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+/*!
+    \page publ-subs.html
+
+    \title Qt Publish Subscribe Module
+    \brief A set of APIs to publish and read values.
+
+    \tableofcontents
+
+    \ingroup technology-apis
+
+    The Qt Publish Subscribe module enables applications to read item values,
+    navigate through and subscribe to change notifications.
+
+    \section1 Overview
+
+    The Value Space, inside which all the item values are stored, unifies various
+    sources of hierarchical data into a single consistent model.  Conceptually
+    the Value Space is a hierarchical tree of which each node or leaf can optionally
+    contain a QVariant value.  A serialized version of a simple example Value
+    Space might look like this:
+
+    \code
+    /Device/Buttons = 3
+    /Device/Buttons/1/Name = Menu
+    /Device/Buttons/1/Usable = true
+    /Device/Buttons/2/Name = Select
+    /Device/Buttons/2/Usable = false
+    /Device/Buttons/3/Name = Back
+    /Device/Buttons/3/Usable = true
+    \endcode
+
+    Existing values within the Value Space are accessed through the QValueSpaceSubscriber class.  This
+    class provides a means to read values, receive change notifications for a given path and navigate
+    through the Value Space.
+
+    New values are added to the Value Space via the QValueSpacePublisher class.  This class allows
+    applications to publish values and receive interest notifications when applications connect to a
+    path.  Interest notifications can be used to refrain from updating values in the Value Space when
+    there are no interested parties.
+
+    Nodes in the Value Space can be thought of as representing schema objects.
+    Obviously this is a conceptual differentiation and not a physical one, as
+    internally the Value Space is treated as one large tree.  By applying
+    structured schema to the space "explore-ability" is increased.  For example,
+    the \c {/Device/Buttons} schema can be defined as containing a value
+    representing the number of mappable buttons on a device, and a sub-item for
+    each adhering to the \c {MappableButton} schema.  The \c {MappableButton}
+    schema itself may be defined as containing two attributes \c {Name} and
+    \c {Usable}.  Change notification is modeled in this fashion also.  Were the
+    \c {/Device/Buttons/1/Name} item to change, the \c {/Device/Buttons/1} item
+    would also be marked as changed, and so on up the tree.  This allows, for example,
+    subscribers to \c {/Device/Buttons} to be notified when anything "button" related changes.
+
+    Internally, the Value Space consists of an arbitrary number of data source trees, or layers, which
+    are stacked on top of each other to form the final unified view.  If two layers contain the same
+    item, e.g. \c {/Device/Buttons}, the value in the layer with a higher priority will shadow that
+    with the layer of the lower priority.  However, if only the layer with the lower priority contained
+    this item, it would be visible through the QValueSpaceSubscriber class, even if the higher priority
+    layer contained sub-items such as \c {/Device/Buttons/1}.  That is, layer shadowing occurs by value
+    not by path. Layer priority is fixed and is defined in the layer implementation.
+
+    The following Value Space layers are available:
+
+    \table
+        \header
+            \li Operating System
+            \li Layer
+            \li Description
+        \row
+            \li {1, 2} Windows
+            \li Non-volatile Registry Layer
+            \li The Non-volatile Registry layer provides a permanent Value Space backing store using
+                keys stored in the Windows' registry.
+                \br
+                The Non-volatile Registry layer has a higher priority.
+        \row
+            \li Volatile Registry Layer
+            \li The Volatile Registry layer provides a non-permanent Value Space backing store using
+                volatile keys stored in the Windows' registry.
+                \br
+                The Volatile Registry layer has a lower priority.
+        \row
+            \li Linux
+            \li \l{GConf Layer}
+            \li The GConf Layer provides a permanent Value Space backing store using GConf. This
+                layer is only available on systems where the GConf is available.
+                \br
+                The GConf Layer has a higher priority.
+    \endtable
+
+    \section1 Detailed Layer Descriptions
+
+    \section2 GConf Layer
+
+    The Qt Publish Subscribe module can be used to access the GConf configuration system.
+
+    \section3 \b{Limitations of GConf Layer}
+
+    GConf can natively store only a limited set of QVariant data types. These types are Bool, Int, Double,
+    String, StringList and List. When publishing other data types the values are automatically serialized
+    and stored to GConf as BASE64 encoded strings. When reading these values they are automatically
+    converted back to the original data types. The serialization/deserialization is transparent operation
+    to the API user but may cause interoperatibility issues with native applications that access the same
+    data directly.
+
+    \section1 Examples
+
+    \section2 Publish and Subscribe
+
+    In the example \l {publish-subscribe}{Publish and Subscribe} the Value Space is used as a method of
+    communicating changes in one dialog (the publisher) to another dialog (the subscriber).
+
+    \section2 Battery Charging - Accessing Publish and Subscribe from QML
+
+    In the example \l {battery-charge}{Accessing Publish and Subscribe from QML} the Publish and
+    Subscribe concept is now extended to make the publisher an input of the level of charge in a
+    battery.  A slider on the publisher dialog represents the modifiable level of charge.  The Value
+    Space acts as a communications medium between the publisher dialog and the subscriber graphical
+    battery animation. The battery is implemented in QML and C++ with Value Space supplying the
+    charge level for the animation to represent.
+
+    \section1 Namespaces and Classes
+
+    \section2 C++ Classes
+
+    \annotatedlist publishsubscribe
+
+    \section2 QML Elements
+
+    \annotatedlist qml-publishsubscribe
+*/

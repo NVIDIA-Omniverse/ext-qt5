@@ -1,0 +1,203 @@
+/****************************************************************************
+**
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing/
+**
+** This file is part of the documentation of the Qt PIM Module.
+**
+** $QT_BEGIN_LICENSE:FDL$
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see http://www.qt.io/terms-conditions. For further
+** information use the contact form at http://www.qt.io/contact-us.
+**
+** GNU Free Documentation License Usage
+** Alternatively, this file may be used under the terms of the GNU Free
+** Documentation License version 1.3 as published by the Free Software
+** Foundation and appearing in the file included in the packaging of
+** this file. Please review the following information to ensure
+** the GNU Free Documentation License version 1.3 requirements
+** will be met: http://www.gnu.org/copyleft/fdl.html.
+** $QT_END_LICENSE$
+**
+****************************************************************************/
+
+
+
+
+/*!
+
+\page organizeradvanced.html
+
+\title Qt Organizer API Advanced Usage
+\section1 Introduction
+
+This section provides some detailed information on more advanced topics
+regarding the Qt Organizer API.
+
+\section2 The Detail Model
+
+While QOrganizerItem and its subclasses provide methods for data access and
+manipulation which should be sufficient for most purposes, it is actually a
+generic container that can hold arbitrary data in the form of \e details. In fact,
+functions for manipulating items, such as QOrganizerItem::displayLabel() or
+QOrganizerEvent::setRecurrenceRule() are merely convenience functions that
+perform operations on the underlying details of an item. A QOrganizerItem
+consists of nothing more than the details it contains, as well as an id and the
+id of its collection.
+
+A QOrganizerItemDetail is a single, cohesive unit of information that is stored
+in an item. A detail may have specific meta-data associated with it, as well as
+access constraints which may apply to the detail (e.g., read-only, irremovable,
+etc).
+
+A list of all standard details defined by this API are listed
+\l{QOrganizerItemDetail Leaf Classes}{here}.
+
+Some details are read-only (such as the modification timestamp of an item) or
+irremovable (like the type of an item), but most are freely modifiable by
+clients. The QOrganizerItem::details(), QOrganizerItem::detail(),
+QOrganizerItem::saveDetail() and QOrganizerItem::removeDetail() functions can be
+used to manipulate these details.
+
+It is important to note that details are implicitly shared objects with
+particular semantics surrounding saving, removal and modification.
+
+\section2 Optimizing Item Retrieval
+
+Clients can inform the manager that they do not require certain details from an
+item, which can allow a manager to optimize item retrieval. In this way, the
+client can inform the manager that they are not interested in any binary blob
+data (e.g., images) in retrieved items. These restrictions can be specified by
+providing a QOrganizerItemFetchHint as an argument to the retrieval operation.
+
+Note that if the item already exists in the database, it will be completely
+replaced. This means that clients should not save any item which was retrieved
+with a non-empty fetchHint defined, or data loss may occur.
+
+\section1 The Organizer Manager and Manager Engines
+\section2 The Organizer Manager
+
+Access to organizer items is provided by implementations of the Qt Organizer
+\l{QOrganizerManager}{manager} API. Each manager may support different
+capabilities (for example, the ability to store certain datatypes, the ability
+to natively filter on different details or details of different definitions, the
+provision of locking mechanisms, the provision of changelog information, etc)
+which are reported by the manager on request. The manager therefore provides
+access to detail definitions and collections of organizer items stored in
+different datastores, in a platform and datastore independent manner.
+
+The QOrganizerManager is in fact a client-facing interface through to a
+platform-specific manager engine (which is implemented as a Qt plugin). While
+clients never interact directly with the manager engine, they may need to be
+aware of limitations of individual engines, or differences between engines. The
+API offered through QOrganizerManager allows clients to retrieve this
+information for the engine which provides the functionality exposed through a
+particular QOrganizerManager.
+
+\section2 Storage Considerations
+
+A QOrganizerManagerEngine may provide an aggregated view of multiple physical
+datastores, some of which may be remote datastores. Clients of the API are aware
+only that the data is managed by a QOrganizerManagerEngine with a particular
+URI. It is possible that multiple different engines will have overlap in the
+datastores which they aggregate, and in that case the way in which those engines
+were implemented will determine whether operations are thread-safe or not.
+
+Since the data may physically be stored in a remote datastore, any operations
+may be dominated by the return-trip-time of communications with the remote
+datastore. As such, \b{it is recommended that clients use the asynchronous
+client API to access organizer information from any QOrganizerManager.}
+
+\section2 Provided Engines
+
+The Qt Organizer module includes several backends already, some of which are
+designed to interface with the default calendar on their particular platform.
+
+\section3 In-Memory Example Engine
+
+The in-memory engine identifies itself as the \c memory engine.
+
+The in-memory engine supports the default schema, and provides almost all
+functionality available through the Qt Organizer API; however, all data
+is stored in-memory and is not persisted in any way.
+
+\section1 Manager Settings and Configuration
+
+Users of the items API can define which backend they wish to access if a manager
+for that backend is available. The list of available managers can be queried
+programmatically at run-time, and the capabilities of different managers can be
+ascertained by inspecting a QOrganizerManager instance. Furthermore, some
+managers can be constructed with parameters which affect the operation of the
+backend.
+
+\section2 Querying a Manager for Capabilities
+
+Different managers will support different capabilities and details. Clients can
+use the meta data reporting functions of QOrganizerManager to determine what the
+capabilities of the manager they have instantiated might be.
+
+\section2 Loading the Manager for a Specific Backend
+
+The client can choose to load a manager for a specific backend. While the engine
+could be found and retrieved using a more advanced plugin framework (such as the
+Qt Service Framework), this code assumes that the client has prior knowledge of
+the backend in question:
+
+\code
+     QOrganizerManager specificManager("memory");
+\endcode
+
+Clients may wish to use this feature of the API if they wish to store or
+retrieve item information to a particular manager (for example, one that
+interfaces with a particular online service).
+
+\section2 Loading a Manager with Specific Parameters
+
+The client can load a manager with specific parameters defined. The parameters
+which are available are backend specific, and so the client has to know which
+parameters are valid for a particular backend, and what argument it takes.
+
+\section2 Meta Data API
+
+The QOrganizerManager class provides a static function
+QOrganizerManager::availableManagers() which allows clients of the API to
+determine (at run time) which plugins (managers) are available for use.
+
+Clients of the API also need to be able to determine (at run time) what the
+capabilities of a given plugin (organizer item manager) are. The
+QOrganizerManager class provides API to query the capabilities of a given
+manager with the following synchronous functions:
+
+\list
+\li \l{QOrganizerManager::supportedFilters()}{supportedFilters()}
+\li \l{QOrganizerManager::supportedItemDetails()}{supportedItemDetails()}
+\li \l{QOrganizerManager::supportedItemTypes()}{supportedItemTypes()}
+\endlist
+
+A given manager is identified by its URI. The URI consists of the manager's
+name, any relevant parameters which were used during instantiation of the
+manager, and the version of the manager. While the name of the manager
+identifies the plugin which provides the functionality, you cannot guarantee
+that the data available through one manager will be available through another
+with the same name (for example, if one parameter tells the plugin to store and
+retrieve organizer information from a particular online service or local file).
+
+The synchronous API offered to allow run-time querying of a manager's metadata
+includes:
+
+\list
+\li \l{QOrganizerManager::managerName()}{managerName}
+\li \l{QOrganizerManager::managerParameters()}{managerParameters}
+\li \l{QOrganizerManager::managerUri()}{managerUri}
+\li \l{QOrganizerManager::parseUri()}{parseUri}
+\li \l{QOrganizerManager::buildUri()}{buildUri}
+\endlist
+
+The functionality that the above functions provide is only available through
+synchronous API.
+
+*/
